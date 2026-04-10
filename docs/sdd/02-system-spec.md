@@ -854,11 +854,46 @@ backend/
 │       └── pagination.py        # 分页工具
 │
 ├── alembic/                     # 数据库迁移
-│   └── versions/
+│   ├── env.py                   # 读取 app 配置，自动发现所有模型
+│   └── versions/                # 迁移脚本
 ├── alembic.ini
-├── requirements.txt
 └── pyproject.toml
 ```
+
+### 4.1 数据库迁移策略（Alembic）
+
+使用 Alembic 管理数据库表结构变更，替代 `Base.metadata.create_all()`。
+
+**环境差异**:
+
+| 环境 | 建表方式 | 说明 |
+|------|----------|------|
+| dev（默认） | `create_all` 自动建表 | 开发方便，启动即用 |
+| prod | `alembic upgrade head` 手动迁移 | 可控、可回滚、有版本记录 |
+
+**常用命令**:
+
+```bash
+# 数据模型变更后，自动生成迁移脚本
+alembic revision --autogenerate -m "描述变更内容"
+
+# 执行迁移（升级到最新）
+alembic upgrade head
+
+# 回滚一个版本
+alembic downgrade -1
+
+# 查看当前版本
+alembic current
+
+# 查看迁移历史
+alembic history
+```
+
+**注意事项**:
+- `alembic/env.py` 从 `app.config.settings` 读取 `DATABASE_URL`，无需在 `alembic.ini` 中重复配置
+- SQLite 环境下已启用 `render_as_batch=True` 以支持 `ALTER TABLE` 操作
+- 每次修改 `app/models/` 下的模型后，需执行 `alembic revision --autogenerate` 生成迁移脚本并审查
 
 ## 5. 前端项目结构
 

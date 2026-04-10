@@ -28,9 +28,28 @@ def seed_default_admin():
         db.close()
 
 
+def _check_security():
+    """Warn or block if running with insecure defaults in production."""
+    if settings.ENV != "dev":
+        if settings.JWT_SECRET_KEY == "dev-secret-key-change-in-production":
+            raise RuntimeError(
+                "生产环境禁止使用默认 JWT 密钥，请设置环境变量 FINWISE_JWT_SECRET_KEY"
+            )
+        if settings.ADMIN_DEFAULT_PASSWORD == "admin123":
+            import warnings
+            warnings.warn(
+                "生产环境建议修改默认管理员密码，设置 FINWISE_ADMIN_DEFAULT_PASSWORD",
+                stacklevel=1,
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    _check_security()
+    # In dev mode, auto-create tables for convenience.
+    # In prod, use: alembic upgrade head
+    if settings.ENV == "dev":
+        Base.metadata.create_all(bind=engine)
     seed_default_admin()
     yield
 
@@ -39,7 +58,7 @@ app = FastAPI(title="FinWise API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

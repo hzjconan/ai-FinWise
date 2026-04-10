@@ -220,6 +220,7 @@
 | **状态管理** | Zustand |
 | **后端** | Python + FastAPI |
 | **ORM** | SQLAlchemy 2.0 |
+| **数据库迁移** | Alembic（autogenerate + batch mode for SQLite） |
 | **数据库** | SQLite（开发）/ PostgreSQL（生产） |
 | **API 规范** | RESTful + OpenAPI 3.0（FastAPI 自动生成） |
 
