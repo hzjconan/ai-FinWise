@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -123,7 +124,11 @@ def add_return_history(
 
     rh = ReturnHistory(product_id=product.id, **data.model_dump())
     db.add(rh)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="该日期的收益记录已存在")
     recalculate_risk(db, product)
     db.commit()
     db.refresh(rh)

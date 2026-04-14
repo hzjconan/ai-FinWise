@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -27,8 +28,13 @@ def admin_login(data: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/customer/anonymous", response_model=AnonymousResponse, status_code=201)
 def create_anonymous_customer(db: Session = Depends(get_db)):
-    code = generate_code(db, Customer, "CUS")
-    customer = Customer(code=code)
-    db.add(customer)
-    db.commit()
-    return AnonymousResponse(customer_code=code)
+    for _ in range(3):
+        code = generate_code(db, Customer, "CUS")
+        customer = Customer(code=code)
+        db.add(customer)
+        try:
+            db.commit()
+            return AnonymousResponse(customer_code=code)
+        except IntegrityError:
+            db.rollback()
+    raise HTTPException(status_code=500, detail="无法生成唯一客户编号")

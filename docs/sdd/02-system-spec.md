@@ -851,7 +851,18 @@ backend/
 │   └── utils/                   # 工具函数
 │       ├── __init__.py
 │       ├── auth.py              # JWT 工具
+│       ├── code_generator.py    # 编码生成器
 │       └── pagination.py        # 分页工具
+│
+├── tests/                       # pytest 测试
+│   ├── conftest.py              # 测试 fixtures（测试数据库、客户端）
+│   ├── test_risk_calculator.py  # 风险计算引擎单元测试
+│   ├── test_auth.py             # 认证 API 测试
+│   ├── test_admin_products.py   # 管理端产品 API 测试
+│   ├── test_admin_questions.py  # 管理端问卷 API 测试
+│   ├── test_assessment.py       # 评估 API 测试
+│   ├── test_recommendations.py  # 推荐 API 测试
+│   └── test_customers.py        # 客户收藏/历史 API 测试
 │
 ├── alembic/                     # 数据库迁移
 │   ├── env.py                   # 读取 app 配置，自动发现所有模型
@@ -947,6 +958,18 @@ frontend/
 │       ├── constants.ts         # 风险等级映射等常量
 │       └── formatters.ts        # 格式化工具
 │
+├── cypress/                     # Cypress E2E 测试
+│   ├── e2e/
+│   │   ├── admin-login.cy.ts    # 管理员登录流程
+│   │   ├── admin-products.cy.ts # 产品管理流程
+│   │   ├── admin-questions.cy.ts# 问卷管理流程
+│   │   ├── customer-products.cy.ts # 客户端产品浏览
+│   │   └── customer-assessment.cy.ts # 风险评估完整流程
+│   ├── support/
+│   │   ├── commands.ts          # 自定义命令（adminLogin 等）
+│   │   └── e2e.ts
+│   └── fixtures/                # 测试数据
+├── cypress.config.ts
 ├── index.html
 ├── vite.config.ts
 ├── tsconfig.json
