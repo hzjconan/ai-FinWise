@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Card, List, Typography } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { listProducts, type Product } from '../api/products';
 import { RiskLevelBadge } from '../components/shared/RiskBadge';
 import { useAuthStore } from '../stores/authStore';
 import { createAnonymousCustomer } from '../api/auth';
+import apiClient from '../api/client';
 
 const { Text } = Typography;
 
@@ -14,12 +15,32 @@ export default function Home() {
   const customerCode = useAuthStore((s) => s.customerCode);
   const setCustomerCode = useAuthStore((s) => s.setCustomerCode);
 
+  // 防止 React StrictMode 开发模式下 useEffect 双重执行导致重复创建匿名客户
+  const customerInitRef = useRef(false);
+
   useEffect(() => {
     listProducts({ page_size: 6 }).then(({ data }) => setProducts(data.items));
-    // Auto-create anonymous customer if not exists
-    if (!customerCode) {
-      createAnonymousCustomer().then(({ data }) => setCustomerCode(data.customer_code));
-    }
+
+    if (customerInitRef.current) return;
+    customerInitRef.current = true;
+
+    // 确保匿名客户身份有效。
+    // customerCode 保存在 localStorage 中，但后端数据库可能已重建（如开发阶段重置 DB），
+    // 导致 localStorage 里的旧 customerCode 在后端已不存在。
+    // 因此即使 localStorage 有值，也需要向后端验证，无效则清除并重新创建。
+    const ensureCustomer = async () => {
+      if (customerCode) {
+        try {
+          await apiClient.get(`/customers/${customerCode}/assessments`);
+          return; // 客户存在，无需操作
+        } catch {
+          setCustomerCode(null); // 客户不存在，清除过期的 code
+        }
+      }
+      const { data } = await createAnonymousCustomer();
+      setCustomerCode(data.customer_code);
+    };
+    ensureCustomer();
   }, []);
 
   return (
