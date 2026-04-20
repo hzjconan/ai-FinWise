@@ -3,17 +3,15 @@
 ## 1. 系统架构
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    客户端 (React)                      │
-│  ┌──────────────────┐  ┌──────────────────────────┐  │
-│  │   管理端 (Admin)   │  │     客户端 (Customer)     │  │
-│  │   Ant Design      │  │   Ant Design Mobile      │  │
-│  │   /admin/*        │  │   /*                     │  │
-│  └────────┬─────────┘  └────────────┬─────────────┘  │
-│           │                         │                 │
-└───────────┼─────────────────────────┼─────────────────┘
-            │         HTTP/REST       │
-            ▼                         ▼
+┌──────────────────────┐  ┌──────────────────────────┐
+│  管理端 (Admin)        │  │   客户端 (Customer)       │
+│  frontend-admin/      │  │   frontend-customer/      │
+│  Ant Design           │  │   Ant Design              │
+│  Port 5174            │  │   Port 5173               │
+│  /*                   │  │   /*                      │
+└────────┬─────────────┘  └────────────┬──────────────┘
+         │         HTTP/REST           │
+         ▼                             ▼
 ┌─────────────────────────────────────────────────────┐
 │                  API Gateway (FastAPI)                │
 │                                                      │
@@ -908,67 +906,92 @@ alembic history
 
 ## 5. 前端项目结构
 
+管理端和客户端为两个独立项目，可分别开发、启动和测试。共享代码（类型、组件、常量）在两个项目中各自维护一份。
+
+### 5.1 管理端 (frontend-admin/)
+
+端口：5174，路由不使用 `/admin` 前缀（独立部署）
+
 ```
-frontend/
+frontend-admin/
 ├── public/
 ├── src/
 │   ├── main.tsx                 # 入口
-│   ├── App.tsx                  # 路由配置
-│   │
-│   ├── api/                     # API 请求封装
-│   │   ├── client.ts            # Axios 实例
-│   │   ├── products.ts
-│   │   ├── questions.ts
-│   │   ├── assessment.ts
-│   │   └── recommendations.ts
-│   │
-│   ├── stores/                  # Zustand 状态管理
-│   │   ├── authStore.ts
-│   │   ├── productStore.ts
-│   │   └── assessmentStore.ts
-│   │
+│   ├── App.tsx                  # 路由配置（/login, /dashboard, /products, /questionnaire）
+│   ├── api/
+│   │   ├── client.ts            # Axios 实例（含 admin token 拦截器）
+│   │   ├── auth.ts              # adminLogin
+│   │   ├── products.ts          # 产品管理 API + 共享类型
+│   │   └── questions.ts         # 问卷管理 API
+│   ├── stores/
+│   │   └── authStore.ts         # adminToken 状态
 │   ├── pages/
-│   │   ├── admin/               # 管理端页面
-│   │   │   ├── Login.tsx
-│   │   │   ├── Dashboard.tsx
-│   │   │   ├── ProductList.tsx
-│   │   │   ├── ProductEdit.tsx
-│   │   │   ├── QuestionList.tsx
-│   │   │   └── QuestionPreview.tsx
-│   │   │
-│   │   └── customer/            # 客户端页面
-│   │       ├── Home.tsx
-│   │       ├── ProductList.tsx
-│   │       ├── ProductDetail.tsx
-│   │       ├── Assessment.tsx
-│   │       ├── AssessmentChat.tsx    # 阶段二
-│   │       ├── AssessmentResult.tsx
-│   │       └── Profile.tsx
-│   │
-│   ├── components/              # 共享组件
-│   │   ├── admin/
-│   │   │   └── AdminLayout.tsx
-│   │   ├── customer/
-│   │   │   └── CustomerLayout.tsx
+│   │   ├── Login.tsx
+│   │   ├── Dashboard.tsx
+│   │   ├── ProductList.tsx
+│   │   ├── ProductEdit.tsx
+│   │   └── QuestionList.tsx
+│   ├── components/
+│   │   ├── AdminLayout.tsx
 │   │   └── shared/
-│   │       ├── RiskBadge.tsx    # 风险等级标签
-│   │       └── ReturnChart.tsx  # 收益走势图
-│   │
+│   │       ├── RiskBadge.tsx
+│   │       └── ReturnChart.tsx
 │   └── utils/
-│       ├── constants.ts         # 风险等级映射等常量
-│       └── formatters.ts        # 格式化工具
-│
-├── cypress/                     # Cypress E2E 测试
+│       └── constants.ts
+├── cypress/
 │   ├── e2e/
-│   │   ├── admin-login.cy.ts    # 管理员登录流程
-│   │   ├── admin-products.cy.ts # 产品管理流程
-│   │   ├── admin-questions.cy.ts# 问卷管理流程
-│   │   ├── customer-products.cy.ts # 客户端产品浏览
-│   │   └── customer-assessment.cy.ts # 风险评估完整流程
-│   ├── support/
-│   │   ├── commands.ts          # 自定义命令（adminLogin 等）
-│   │   └── e2e.ts
-│   └── fixtures/                # 测试数据
+│   │   ├── admin-login.cy.ts
+│   │   ├── admin-products.cy.ts
+│   │   └── admin-questions.cy.ts
+│   └── support/
+│       └── e2e.ts               # adminLogin, seedProduct, seedQuestions
+├── cypress.config.ts
+├── index.html
+├── vite.config.ts
+├── tsconfig.json
+└── package.json
+```
+
+### 5.2 客户端 (frontend-customer/)
+
+端口：5173（Vite 默认端口）
+
+```
+frontend-customer/
+├── public/
+├── src/
+│   ├── main.tsx                 # 入口
+│   ├── App.tsx                  # 路由配置（/, /products, /assessment, /profile）
+│   ├── api/
+│   │   ├── client.ts            # Axios 实例（无 auth 拦截器）
+│   │   ├── auth.ts              # createAnonymousCustomer
+│   │   ├── products.ts          # 产品查询 API + 共享类型
+│   │   ├── assessment.ts        # 评估 API + Question/Option 类型
+│   │   └── customers.ts         # 收藏、评估历史 API
+│   ├── stores/
+│   │   └── authStore.ts         # customerCode 状态
+│   ├── pages/
+│   │   ├── Home.tsx
+│   │   ├── ProductList.tsx
+│   │   ├── ProductDetail.tsx
+│   │   ├── Assessment.tsx
+│   │   ├── AssessmentResult.tsx
+│   │   └── Profile.tsx
+│   ├── components/
+│   │   ├── CustomerLayout.tsx
+│   │   └── shared/
+│   │       ├── RiskBadge.tsx
+│   │       └── ReturnChart.tsx
+│   └── utils/
+│       └── constants.ts
+├── cypress/
+│   ├── e2e/
+│   │   ├── customer-home.cy.ts
+│   │   ├── customer-products.cy.ts
+│   │   ├── customer-assessment.cy.ts
+│   │   └── customer-profile.cy.ts
+│   └── support/
+│       └── e2e.ts               # createAnonymousCustomer, seedProduct, seedQuestions
 ├── cypress.config.ts
 ├── index.html
 ├── vite.config.ts
