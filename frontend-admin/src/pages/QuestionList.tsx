@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
-  Button, Card, Form, Input, InputNumber, List, Modal, Space, Tag, message, Popconfirm,
+  Button, Card, Form, Input, InputNumber, List, Modal, Space, Tag, Tooltip, message, Popconfirm,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import {
   adminListQuestions, adminCreateQuestion, adminUpdateQuestion, adminDeleteQuestion,
   type Question,
@@ -113,14 +113,19 @@ export default function QuestionList() {
           <Form.List name="options">
             {(fields, { add, remove }) => (
               <>
-                <label style={{ fontWeight: 'bold' }}>选项</label>
+                <Space style={{ fontWeight: 'bold', marginBottom: 8 }}>
+                  选项
+                  <Tooltip title="每个选项的分值会影响风险评估结果：所有题目得分汇总后计算百分比，分值越高，评估结果越偏向激进型（C5）；分值越低，越偏向保守型（C1）。">
+                    <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
+                  </Tooltip>
+                </Space>
                 {fields.map(({ key, name, ...rest }) => (
                   <Space key={key} style={{ display: 'flex', marginBottom: 8 }} align="start">
                     <Form.Item {...rest} name={[name, 'content']} rules={[{ required: true }]}>
                       <Input placeholder="选项内容" style={{ width: 300 }} />
                     </Form.Item>
                     <Form.Item {...rest} name={[name, 'score']} rules={[{ required: true }]}>
-                      <InputNumber placeholder="分值" min={1} max={10} />
+                      <InputNumber min={1} max={10} addonBefore="分值" />
                     </Form.Item>
                     {fields.length > 1 && (
                       <Button danger onClick={() => remove(name)} icon={<DeleteOutlined />} />
