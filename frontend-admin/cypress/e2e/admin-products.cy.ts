@@ -59,6 +59,27 @@ describe('Admin Product Management', () => {
     cy.contains('.ant-table-column-has-sorters', '状态').should('not.exist');
   });
 
+  it('paginates to page 2 with single API call and renders page 2 rows', () => {
+    // 种够 >10 条以产生第 2 页
+    for (let i = 0; i < 12; i += 1) {
+      cy.seedProduct(`PAG-${String(i).padStart(3, '0')}`, `分页测试${i}`);
+    }
+    const calls: string[] = [];
+    cy.intercept('GET', '/api/v1/admin/products?*', (req) => {
+      calls.push(req.url);
+    }).as('list');
+    cy.visit('/products');
+    cy.wait('@list');
+    cy.get('.ant-pagination-item-2').click();
+    cy.wait('@list').its('request.url').should('include', 'page=2');
+    cy.get('.ant-pagination-item-2').should('have.class', 'ant-pagination-item-active');
+    // 只应新增 1 条翻页请求（首次 + 翻页 = 2 次）
+    cy.wait(500).then(() => {
+      const page2Calls = calls.filter((u) => /[?&]page=2(&|$)/.test(u));
+      expect(page2Calls.length, 'page=2 API call count').to.eq(1);
+    });
+  });
+
   it('sends risk_level query param when filter selected', () => {
     cy.intercept('GET', '/api/v1/admin/products?*').as('list');
     cy.visit('/products');

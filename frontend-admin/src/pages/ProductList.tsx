@@ -15,36 +15,43 @@ export default function AdminProductList() {
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<{ sort_by?: string; sort_order?: 'asc' | 'desc' }>({});
+  const [refreshTick, setRefreshTick] = useState(0);
 
-  const load = async (p = page, s = sort) => {
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    try {
-      const { data } = await adminListProducts({ page: p, page_size: 10, ...filters, ...s });
-      setProducts(data.items);
-      setTotal(data.total);
-    } finally {
-      setLoading(false);
-    }
-  };
+    adminListProducts({ page, page_size: 10, ...filters, ...sort })
+      .then(({ data }) => {
+        if (cancelled) return;
+        setProducts(data.items);
+        setTotal(data.total);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [page, filters, sort, refreshTick]);
 
-  useEffect(() => { load(1, sort); setPage(1); }, [filters, sort]);
+  useEffect(() => { setPage(1); }, [filters]);
 
-  const handleTableChange: TableProps<Product>['onChange'] = (_pag, _flt, sorter) => {
+  const handleTableChange: TableProps<Product>['onChange'] = (pag, _flt, sorter) => {
     const s = Array.isArray(sorter) ? sorter[0] : sorter;
-    if (s && s.order && s.columnKey) {
-      setSort({
-        sort_by: String(s.columnKey),
-        sort_order: s.order === 'ascend' ? 'asc' : 'desc',
-      });
-    } else {
-      setSort({});
+    const nextSortBy = s?.order && s.columnKey ? String(s.columnKey) : undefined;
+    const nextSortOrder: 'asc' | 'desc' | undefined =
+      s?.order === 'ascend' ? 'asc' : s?.order === 'descend' ? 'desc' : undefined;
+    const sortChanged =
+      nextSortBy !== sort.sort_by || nextSortOrder !== sort.sort_order;
+
+    if (sortChanged) {
+      setSort(nextSortBy ? { sort_by: nextSortBy, sort_order: nextSortOrder } : {});
+      setPage(1);
+    } else if (pag.current && pag.current !== page) {
+      setPage(pag.current);
     }
   };
 
   const handleStatus = async (code: string, status: string) => {
     await adminUpdateStatus(code, status);
     message.success('状态已更新');
-    load();
+    setRefreshTick((t) => t + 1);
   };
 
   const columns: TableProps<Product>['columns'] = [
@@ -132,7 +139,7 @@ export default function AdminProductList() {
         dataSource={products}
         loading={loading}
         onChange={handleTableChange}
-        pagination={{ current: page, total, pageSize: 10, onChange: (p) => { setPage(p); load(p); } }}
+        pagination={{ current: page, total, pageSize: 10 }}
       />
     </div>
   );
