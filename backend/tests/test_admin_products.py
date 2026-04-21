@@ -45,6 +45,29 @@ class TestListProducts:
         resp = client.get("/api/v1/admin/products?status=draft", headers=auth_header)
         assert resp.json()["total"] == 0
 
+    def test_sort_by_name(self, client, auth_header):
+        for code, name in [("S-003", "丙"), ("S-001", "甲"), ("S-002", "乙")]:
+            client.post("/api/v1/admin/products", json={
+                "product_code": code, "name": name, "type": "债券", "min_investment": 0,
+            }, headers=auth_header)
+        asc = client.get(
+            "/api/v1/admin/products?sort_by=product_code&sort_order=asc",
+            headers=auth_header,
+        ).json()["items"]
+        assert [p["product_code"] for p in asc] == ["S-001", "S-002", "S-003"]
+        desc = client.get(
+            "/api/v1/admin/products?sort_by=product_code&sort_order=desc",
+            headers=auth_header,
+        ).json()["items"]
+        assert [p["product_code"] for p in desc] == ["S-003", "S-002", "S-001"]
+
+    def test_sort_invalid_field_rejected(self, client, auth_header):
+        resp = client.get(
+            "/api/v1/admin/products?sort_by=created_by&sort_order=asc",
+            headers=auth_header,
+        )
+        assert resp.status_code == 400
+
 
 class TestProductDetail:
     def test_get_detail(self, client, auth_header, sample_product):

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Button, Table, Tag, Space, Select, message, Popconfirm } from 'antd';
+import type { TableProps } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { adminListProducts, adminUpdateStatus, type Product } from '../api/products';
 import { RiskLevelBadge } from '../components/shared/RiskBadge';
-import { PRODUCT_STATUS, PRODUCT_TYPES } from '../utils/constants';
+import { PRODUCT_STATUS, PRODUCT_TYPES, RISK_LEVEL_MAP } from '../utils/constants';
 
 export default function AdminProductList() {
   const navigate = useNavigate();
@@ -13,11 +14,12 @@ export default function AdminProductList() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const [sort, setSort] = useState<{ sort_by?: string; sort_order?: 'asc' | 'desc' }>({});
 
-  const load = async (p = page) => {
+  const load = async (p = page, s = sort) => {
     setLoading(true);
     try {
-      const { data } = await adminListProducts({ page: p, page_size: 10, ...filters });
+      const { data } = await adminListProducts({ page: p, page_size: 10, ...filters, ...s });
       setProducts(data.items);
       setTotal(data.total);
     } finally {
@@ -25,7 +27,19 @@ export default function AdminProductList() {
     }
   };
 
-  useEffect(() => { load(1); setPage(1); }, [filters]);
+  useEffect(() => { load(1, sort); setPage(1); }, [filters, sort]);
+
+  const handleTableChange: TableProps<Product>['onChange'] = (_pag, _flt, sorter) => {
+    const s = Array.isArray(sorter) ? sorter[0] : sorter;
+    if (s && s.order && s.columnKey) {
+      setSort({
+        sort_by: String(s.columnKey),
+        sort_order: s.order === 'ascend' ? 'asc' : 'desc',
+      });
+    } else {
+      setSort({});
+    }
+  };
 
   const handleStatus = async (code: string, status: string) => {
     await adminUpdateStatus(code, status);
@@ -33,19 +47,20 @@ export default function AdminProductList() {
     load();
   };
 
-  const columns = [
-    { title: '产品编号', dataIndex: 'product_code', key: 'code' },
-    { title: '名称', dataIndex: 'name', key: 'name' },
+  const columns: TableProps<Product>['columns'] = [
+    { title: '产品编号', dataIndex: 'product_code', key: 'product_code', sorter: true },
+    { title: '名称', dataIndex: 'name', key: 'name', sorter: true },
     { title: '类型', dataIndex: 'type', key: 'type' },
     {
       title: '期望收益',
       dataIndex: 'expected_return',
-      key: 'return',
+      key: 'expected_return',
+      sorter: true,
       render: (v?: number) => v != null ? `${v}%` : '-',
     },
     {
       title: '风险等级',
-      key: 'risk',
+      key: 'risk_level',
       render: (_: unknown, r: Product) => <RiskLevelBadge level={r.risk_level} />,
     },
     {
@@ -96,6 +111,16 @@ export default function AdminProductList() {
             onChange={(v) => setFilters((f) => ({ ...f, status: v }))}
             options={Object.entries(PRODUCT_STATUS).map(([k, v]) => ({ label: v.label, value: k }))}
           />
+          <Select
+            placeholder="风险等级"
+            allowClear
+            style={{ width: 140 }}
+            onChange={(v) => setFilters((f) => ({ ...f, risk_level: v }))}
+            options={Object.entries(RISK_LEVEL_MAP).map(([k, v]) => ({
+              label: `${k} · ${v.label}`,
+              value: k,
+            }))}
+          />
         </Space>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/products/new')}>
           新增产品
@@ -106,6 +131,7 @@ export default function AdminProductList() {
         columns={columns}
         dataSource={products}
         loading={loading}
+        onChange={handleTableChange}
         pagination={{ current: page, total, pageSize: 10, onChange: (p) => { setPage(p); load(p); } }}
       />
     </div>

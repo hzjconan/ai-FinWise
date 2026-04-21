@@ -24,6 +24,17 @@ from app.utils.pagination import paginate
 router = APIRouter()
 
 
+SORTABLE_FIELDS = {
+    "product_code": Product.product_code,
+    "name": Product.name,
+    "type": Product.type,
+    "expected_return": Product.expected_return,
+    "risk_level": Product.risk_level,
+    "status": Product.status,
+    "created_at": Product.created_at,
+}
+
+
 @router.get("", response_model=PaginatedProducts)
 def list_products(
     page: int = Query(1, ge=1),
@@ -31,6 +42,8 @@ def list_products(
     status_filter: str | None = Query(None, alias="status"),
     risk_level: str | None = None,
     type: str | None = None,
+    sort_by: str | None = Query(None),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
     _admin: Admin = Depends(get_current_admin),
 ):
@@ -41,7 +54,10 @@ def list_products(
         q = q.filter(Product.risk_level == risk_level)
     if type:
         q = q.filter(Product.type == type)
-    q = q.order_by(Product.created_at.desc())
+    sort_col = SORTABLE_FIELDS.get(sort_by) if sort_by else Product.created_at
+    if sort_col is None:
+        raise HTTPException(status_code=400, detail="不支持的排序字段")
+    q = q.order_by(sort_col.desc() if sort_order == "desc" else sort_col.asc())
     items, total = paginate(q, page, page_size)
     return PaginatedProducts(
         total=total, page=page, page_size=page_size,
