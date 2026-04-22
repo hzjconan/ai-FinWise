@@ -40,13 +40,22 @@ describe('Admin Product Management', () => {
   });
 
   it('sends sort params when clicking sortable column header', () => {
-    cy.intercept('GET', '/api/v1/admin/products?*').as('list');
+    const calls: string[] = [];
+    cy.intercept('GET', '/api/v1/admin/products?*', (req) => {
+      calls.push(req.url);
+    }).as('list');
     cy.visit('/products');
     cy.wait('@list');
-    cy.contains('.ant-table-column-title', '产品编号').click();
-    cy.wait('@list').its('request.url').should('match', /sort_by=product_code.*sort_order=asc/);
-    cy.contains('.ant-table-column-title', '产品编号').click();
-    cy.wait('@list').its('request.url').should('match', /sort_by=product_code.*sort_order=desc/);
+    cy.contains('.ant-table-column-has-sorters', '产品编号').click();
+    cy.wait('@list');
+    cy.then(() => {
+      expect(calls.some((u) => /sort_by=product_code.*sort_order=asc/.test(u))).to.eq(true);
+    });
+    cy.contains('.ant-table-column-has-sorters', '产品编号').click();
+    cy.wait('@list');
+    cy.then(() => {
+      expect(calls.some((u) => /sort_by=product_code.*sort_order=desc/.test(u))).to.eq(true);
+    });
   });
 
   it('does not show sorter on 类型/风险等级/状态 columns', () => {
@@ -71,7 +80,10 @@ describe('Admin Product Management', () => {
     cy.visit('/products');
     cy.wait('@list');
     cy.get('.ant-pagination-item-2').click();
-    cy.wait('@list').its('request.url').should('include', 'page=2');
+    cy.wait('@list');
+    cy.then(() => {
+      expect(calls.some((u) => /[?&]page=2(&|$)/.test(u))).to.eq(true);
+    });
     cy.get('.ant-pagination-item-2').should('have.class', 'ant-pagination-item-active');
     // 只应新增 1 条翻页请求（首次 + 翻页 = 2 次）
     cy.wait(500).then(() => {
@@ -81,12 +93,18 @@ describe('Admin Product Management', () => {
   });
 
   it('sends risk_level query param when filter selected', () => {
-    cy.intercept('GET', '/api/v1/admin/products?*').as('list');
+    const calls: string[] = [];
+    cy.intercept('GET', '/api/v1/admin/products?*', (req) => {
+      calls.push(req.url);
+    }).as('list');
     cy.visit('/products');
     cy.wait('@list');
-    cy.get('.ant-select-selection-placeholder').contains('风险等级').click();
-    cy.get('.ant-select-dropdown:visible').contains('R2').click();
-    cy.wait('@list').its('request.url').should('include', 'risk_level=R2');
+    cy.contains('.ant-select-placeholder', '风险等级').parents('.ant-select').first().click();
+    cy.get('.ant-select-dropdown:visible .ant-select-item-option[title^="R2"]').click();
+    cy.wait('@list');
+    cy.then(() => {
+      expect(calls.some((u) => u.includes('risk_level=R2'))).to.eq(true);
+    });
   });
 
   it('manages product status', () => {

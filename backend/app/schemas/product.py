@@ -80,3 +80,7 @@ class PaginatedProducts(BaseModel):
     page: int
     page_size: int
     items: list[ProductOut]
+
+
+class HotProducts(BaseModel):
+    items: list[ProductOut]

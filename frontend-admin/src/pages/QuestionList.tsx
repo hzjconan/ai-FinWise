@@ -125,7 +125,7 @@ export default function QuestionList() {
                       <Input placeholder="选项内容" style={{ width: 300 }} />
                     </Form.Item>
                     <Form.Item {...rest} name={[name, 'score']} rules={[{ required: true }]}>
-                      <InputNumber min={1} max={10} addonBefore="分值" />
+                      <InputNumber min={1} max={10} addonBefore="分值" placeholder="分值" />
                     </Form.Item>
                     {fields.length > 1 && (
                       <Button danger onClick={() => remove(name)} icon={<DeleteOutlined />} />

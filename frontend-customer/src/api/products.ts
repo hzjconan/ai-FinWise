@@ -39,3 +39,6 @@ export const listProducts = (params?: Record<string, unknown>) =>
 
 export const getProduct = (code: string) =>
   apiClient.get<ProductDetail>(`/products/${code}`);
+
+export const getHotProducts = () =>
+  apiClient.get<{ items: Product[] }>('/products/hot');

@@ -1,4 +1,15 @@
 // Global Cypress support file for customer tests
+export {};
+
+declare global {
+  namespace Cypress {
+    interface Chainable<Subject = any> {
+      createAnonymousCustomer(): Chainable<void>;
+      seedProduct(productCode: string, name: string): Chainable<void>;
+      seedQuestions(): Chainable<void>;
+    }
+  }
+}
 
 // Custom command: create anonymous customer
 Cypress.Commands.add('createAnonymousCustomer', () => {
@@ -110,12 +121,3 @@ Cypress.Commands.add('seedQuestions', () => {
   });
 });
 
-declare global {
-  namespace Cypress {
-    interface Chainable {
-      createAnonymousCustomer(): Chainable<void>;
-      seedProduct(productCode: string, name: string): Chainable<void>;
-      seedQuestions(): Chainable<void>;
-    }
-  }
-}

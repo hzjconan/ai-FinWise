@@ -586,6 +586,42 @@ API 路径示例：`GET /products/WY-2025-001`，`GET /customers/CUS-20250409-00
 
 **Response 200**: 同管理端产品详情结构（不含 status 和 created_by）
 
+#### GET /products/hot
+获取"热门产品"列表，每个风险等级取 expected_return 最高的 Top 2 活跃产品。服务于客户端首页（F-C06）。
+
+**Query Params**: 无
+
+**筛选条件**:
+- `status = 'active'`
+- `risk_level IS NOT NULL`
+
+**组内排序**: 各 `risk_level` 分区内按 `expected_return DESC`，每档保留 `ROW_NUMBER <= 2`。
+
+**返回顺序**: `risk_level ASC, expected_return DESC`。总条数最多 10；某档不足 2 条按实际返回。
+
+**参考实现（SQLite/PostgreSQL 窗口函数）**:
+```sql
+SELECT * FROM (
+  SELECT *,
+    ROW_NUMBER() OVER (PARTITION BY risk_level ORDER BY expected_return DESC) AS rn
+  FROM products
+  WHERE status = 'active' AND risk_level IS NOT NULL
+) t
+WHERE rn <= 2
+ORDER BY risk_level ASC, expected_return DESC;
+```
+
+**Response 200**:
+```json
+{
+  "items": [
+    { "product_code": "...", "name": "...", "type": "...", "risk_level": "R1",
+      "expected_return": 4.5, "min_investment": 1000, ... }
+  ]
+}
+```
+（`items` 元素结构同 `GET /products` 返回的单条产品；不分页）
+
 ---
 
 ### 3.5 客户端 — 风险评估
@@ -981,7 +1017,8 @@ frontend-customer/
 │   │   ├── CustomerLayout.tsx
 │   │   └── shared/
 │   │       ├── RiskBadge.tsx
-│   │       └── ReturnChart.tsx
+│   │       ├── ReturnChart.tsx
+│   │       └── ProductCard.tsx    # 产品卡片，Home/AssessmentResult/ProductList 共享
 │   └── utils/
 │       └── constants.ts
 ├── cypress/

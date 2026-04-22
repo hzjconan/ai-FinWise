@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, List, Result, Typography } from 'antd';
+import { Button, Card, Result } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { AssessmentResult, Recommendations, RecommendedProduct } from '../api/assessment';
 import { getRecommendations } from '../api/assessment';
-import { PreferenceBadge, RiskLevelBadge } from '../components/shared/RiskBadge';
+import { PreferenceBadge } from '../components/shared/RiskBadge';
+import ProductCard from '../components/shared/ProductCard';
 import { useAuthStore } from '../stores/authStore';
-
-const { Text } = Typography;
 
 export default function AssessmentResultPage() {
   const location = useLocation();
@@ -31,31 +30,12 @@ export default function AssessmentResultPage() {
     );
   }
 
-  const renderProduct = (p: RecommendedProduct) => (
-    <Card
-      size="small"
-      style={{ marginBottom: 8, cursor: 'pointer' }}
-      onClick={() => navigate(`/products/${p.product_code}`)}
-      key={p.product_code}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <Text strong>{p.name}</Text>
-          <br />
-          <Text type="secondary">{p.type}</Text>
-          {p.match_type === 'conservative' && <Text type="secondary"> · 稍保守</Text>}
-          {p.match_type === 'aggressive' && <Text type="secondary"> · 稍激进</Text>}
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <Text style={{ fontSize: 16, color: '#cf1322' }}>
-            {p.expected_return != null ? `${p.expected_return}%` : '-'}
-          </Text>
-          <br />
-          <RiskLevelBadge level={p.risk_level} />
-        </div>
-      </div>
-    </Card>
-  );
+  const extraLabel = (p: RecommendedProduct) =>
+    p.match_type === 'conservative'
+      ? '稍保守'
+      : p.match_type === 'aggressive'
+        ? '稍激进'
+        : undefined;
 
   return (
     <div>
@@ -76,13 +56,17 @@ export default function AssessmentResultPage() {
           {recs.exact_matches.length > 0 && (
             <>
               <h3 style={{ marginBottom: 8 }}>为您精选</h3>
-              {recs.exact_matches.map(renderProduct)}
+              {recs.exact_matches.map((p) => (
+                <ProductCard key={p.product_code} product={p} extraLabel={extraLabel(p)} />
+              ))}
             </>
           )}
           {recs.adjacent_matches.length > 0 && (
             <>
               <h3 style={{ margin: '16px 0 8px' }}>您可能也感兴趣</h3>
-              {recs.adjacent_matches.map(renderProduct)}
+              {recs.adjacent_matches.map((p) => (
+                <ProductCard key={p.product_code} product={p} extraLabel={extraLabel(p)} />
+              ))}
             </>
           )}
         </>

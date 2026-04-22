@@ -1,85 +1,149 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Card, List, Typography } from 'antd';
+import { Button, Card, Empty, Typography } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { listProducts, type Product } from '../api/products';
-import { RiskLevelBadge } from '../components/shared/RiskBadge';
+import { getHotProducts, type Product } from '../api/products';
+import { getRecommendations, type Recommendations } from '../api/assessment';
+import { PreferenceBadge } from '../components/shared/RiskBadge';
+import ProductCard from '../components/shared/ProductCard';
 import { useAuthStore } from '../stores/authStore';
 import { createAnonymousCustomer } from '../api/auth';
 import apiClient from '../api/client';
 
 const { Text } = Typography;
 
+interface AssessmentHistoryItem {
+  code: string;
+  risk_preference: string;
+  risk_label: string;
+  created_at: string;
+}
+
 export default function Home() {
   const navigate = useNavigate();
-  const [products, setProducts] = useState<Product[]>([]);
+  const [hot, setHot] = useState<Product[]>([]);
+  const [recs, setRecs] = useState<Recommendations | null>(null);
+  const [latestAssessment, setLatestAssessment] = useState<AssessmentHistoryItem | null>(null);
+  const [ready, setReady] = useState(false);
   const customerCode = useAuthStore((s) => s.customerCode);
   const setCustomerCode = useAuthStore((s) => s.setCustomerCode);
 
-  // 防止 React StrictMode 开发模式下 useEffect 双重执行导致重复创建匿名客户
   const customerInitRef = useRef(false);
 
   useEffect(() => {
-    listProducts({ page_size: 6 }).then(({ data }) => setProducts(data.items));
+    getHotProducts().then(({ data }) => setHot(data.items));
 
     if (customerInitRef.current) return;
     customerInitRef.current = true;
 
-    // 确保匿名客户身份有效。
-    // customerCode 保存在 localStorage 中，但后端数据库可能已重建（如开发阶段重置 DB），
-    // 导致 localStorage 里的旧 customerCode 在后端已不存在。
-    // 因此即使 localStorage 有值，也需要向后端验证，无效则清除并重新创建。
-    const ensureCustomer = async () => {
-      if (customerCode) {
+    const fetchAssessments = async (c: string) =>
+      apiClient.get<AssessmentHistoryItem[]>(`/customers/${c}/assessments`);
+
+    const init = async () => {
+      let code = customerCode;
+      let assessments: AssessmentHistoryItem[] = [];
+
+      if (code) {
         try {
-          await apiClient.get(`/customers/${customerCode}/assessments`);
-          return; // 客户存在，无需操作
+          const { data } = await fetchAssessments(code);
+          assessments = data;
         } catch {
-          setCustomerCode(null); // 客户不存在，清除过期的 code
+          setCustomerCode(null);
+          code = null;
         }
       }
-      const { data } = await createAnonymousCustomer();
-      setCustomerCode(data.customer_code);
+
+      if (!code) {
+        const { data } = await createAnonymousCustomer();
+        setCustomerCode(data.customer_code);
+        code = data.customer_code;
+        try {
+          const { data: list } = await fetchAssessments(code);
+          assessments = list;
+        } catch {
+          assessments = [];
+        }
+      }
+
+      setLatestAssessment(assessments[0] ?? null);
+
+      if (assessments.length > 0 && code) {
+        try {
+          const { data } = await getRecommendations(code);
+          setRecs(data);
+        } catch {
+          // No assessment yet — leave recs null
+        }
+      }
+      setReady(true);
     };
-    ensureCustomer();
+    init();
   }, []);
+
+  const hasAssessed = !!latestAssessment;
+  const recProducts = recs ? [...recs.exact_matches, ...recs.adjacent_matches] : [];
+  const recCodes = new Set(recProducts.map((p) => p.product_code));
+  const hotFiltered = hot.filter((p) => !recCodes.has(p.product_code));
 
   return (
     <div>
-      <Card style={{ marginBottom: 16, textAlign: 'center' }}>
-        <h3>不知道该买什么理财产品？</h3>
-        <p style={{ color: '#666', marginBottom: 16 }}>完成风险评估，获取专属推荐</p>
-        <Button type="primary" size="large" onClick={() => navigate('/assessment')}>
-          开始风险评估
-        </Button>
-      </Card>
+      {!ready ? null : hasAssessed ? (
+        <Card style={{ marginBottom: 16, textAlign: 'center' }}>
+          <div style={{ marginBottom: 8 }}>
+            <Text type="secondary">当前风险偏好：</Text>
+            <PreferenceBadge level={latestAssessment!.risk_preference} />
+            <Text> {latestAssessment!.risk_label}</Text>
+          </div>
+          <p style={{ color: '#666', marginBottom: 16 }}>偏好或情况有变？可再次评估以更新推荐</p>
+          <Button type="primary" onClick={() => navigate('/assessment')}>
+            重新评估
+          </Button>
+        </Card>
+      ) : (
+        <Card style={{ marginBottom: 16, textAlign: 'center' }}>
+          <h3>不知道该买什么理财产品？</h3>
+          <p style={{ color: '#666', marginBottom: 16 }}>完成风险评估，获取专属推荐</p>
+          <Button type="primary" size="large" onClick={() => navigate('/assessment')}>
+            开始风险评估
+          </Button>
+        </Card>
+      )}
 
-      <h3 style={{ marginBottom: 12 }}>热门产品</h3>
-      <List
-        dataSource={products}
-        renderItem={(p) => (
-          <Card
-            size="small"
-            style={{ marginBottom: 8, cursor: 'pointer' }}
-            onClick={() => navigate(`/products/${p.product_code}`)}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <Text strong>{p.name}</Text>
-                <br />
-                <Text type="secondary">{p.type}</Text>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <Text style={{ fontSize: 18, color: '#cf1322' }}>
-                  {p.expected_return != null ? `${p.expected_return}%` : '-'}
-                </Text>
-                <br />
-                <RiskLevelBadge level={p.risk_level} />
-              </div>
-            </div>
-          </Card>
-        )}
-      />
-      <Button block onClick={() => navigate('/products')}>查看全部产品</Button>
+      {hasAssessed && (
+        <>
+          <h3 style={{ marginBottom: 12 }}>为您推荐</h3>
+          {recProducts.length > 0 ? (
+            recProducts.map((p) => (
+              <ProductCard
+                key={p.product_code}
+                product={p}
+                extraLabel={
+                  p.match_type === 'conservative'
+                    ? '稍保守'
+                    : p.match_type === 'aggressive'
+                      ? '稍激进'
+                      : undefined
+                }
+              />
+            ))
+          ) : (
+            <Empty
+              description="暂无合适的理财产品，建议查看热门产品或联系理财经理"
+              style={{ marginBottom: 16 }}
+            />
+          )}
+        </>
+      )}
+
+      <h3 style={{ margin: '16px 0 12px' }}>热门产品</h3>
+      {hotFiltered.length > 0 ? (
+        hotFiltered.map((p) => <ProductCard key={p.product_code} product={p} />)
+      ) : (
+        <Empty description="暂无热门产品" style={{ marginBottom: 16 }} />
+      )}
+
+      <Button block onClick={() => navigate('/products')}>
+        查看全部产品
+      </Button>
     </div>
   );
 }
