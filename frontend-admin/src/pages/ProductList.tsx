@@ -139,7 +139,12 @@ export default function AdminProductList() {
         dataSource={products}
         loading={loading}
         onChange={handleTableChange}
-        pagination={{ current: page, total, pageSize: 10 }}
+        pagination={{
+          current: page,
+          total,
+          pageSize: 10,
+          showTotal: (t, [from, to]) => `第 ${from}-${to} 条 / 共 ${t} 条`,
+        }}
       />
     </div>
   );

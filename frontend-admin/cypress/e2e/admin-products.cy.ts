@@ -92,6 +92,17 @@ describe('Admin Product Management', () => {
     });
   });
 
+  it('shows total count and current range in pagination', () => {
+    for (let i = 0; i < 12; i += 1) {
+      cy.seedProduct(`SHOWTOTAL-${String(i).padStart(3, '0')}`, `总数测试${i}`);
+    }
+    cy.visit('/products');
+    cy.get('.ant-pagination-total-text').should('contain.text', '共').and('contain.text', '条');
+    cy.get('.ant-pagination-total-text').invoke('text').should('match', /第\s*1-\d+\s*条\s*\/\s*共\s*\d+\s*条/);
+    cy.get('.ant-pagination-item-2').click();
+    cy.get('.ant-pagination-total-text').invoke('text').should('match', /第\s*11-\d+\s*条/);
+  });
+
   it('sends risk_level query param when filter selected', () => {
     const calls: string[] = [];
     cy.intercept('GET', '/api/v1/admin/products?*', (req) => {
