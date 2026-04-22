@@ -89,6 +89,33 @@ fi
 
 # Run customer tests
 if [[ "$TARGET" == "customer" || "$TARGET" == "all" ]]; then
+    # 若先跑过 admin 套件，admin 会在共享的测试 DB 中留下 15+ 产品（包括 12 个 PAG-XXX
+    # 分页测试产品）。customer 端依赖 /products 和 /products/hot 返回新种的产品，
+    # 但所有 seed 产品具有相同的 expected_return / risk_level，排序时并列导致新产品挤不进
+    # 首页或热门列表。这里在两套件之间重启 backend、清空 DB 以隔离测试数据。
+    if [[ "$TARGET" == "all" ]]; then
+        echo "Resetting test database between admin and customer suites..."
+        kill "$BACKEND_PID" 2>/dev/null || true
+        wait "$BACKEND_PID" 2>/dev/null || true
+        rm -f "$TEST_DB"
+        cd "$BACKEND_DIR"
+        source .venv/bin/activate
+        FINWISE_DATABASE_URL="sqlite:///./finwise_test.db" \
+            uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+        BACKEND_PID=$!
+        for i in $(seq 1 30); do
+            if curl -sf --noproxy '*' http://127.0.0.1:8000/docs >/dev/null 2>&1; then
+                echo "Backend ready (fresh DB)."
+                break
+            fi
+            if [ "$i" -eq 30 ]; then
+                echo "ERROR: Backend failed to restart within 30s"
+                exit 1
+            fi
+            sleep 1
+        done
+    fi
+
     echo "Starting customer frontend (port 5173)..."
     cd "$CUSTOMER_DIR"
     npm run dev &
