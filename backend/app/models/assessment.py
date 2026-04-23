@@ -19,6 +19,7 @@ class Assessment(Base):
     risk_preference: Mapped[str] = mapped_column(String(2), nullable=False)
     ai_summary: Mapped[str | None] = mapped_column(Text)
     ai_dimensions: Mapped[dict | None] = mapped_column(JSON)
+    chat_session_id: Mapped[int | None] = mapped_column(ForeignKey("chat_sessions.id"))
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
 
     answers: Mapped[list["AssessmentAnswer"]] = relationship(

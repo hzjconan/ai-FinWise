@@ -1,5 +1,6 @@
 from app.models.admin import Admin
 from app.models.assessment import Assessment, AssessmentAnswer
+from app.models.chat import ChatMessage, ChatSession
 from app.models.customer import Customer
 from app.models.favorite import Favorite
 from app.models.product import Product, ReturnHistory
@@ -14,5 +15,7 @@ __all__ = [
     "Customer",
     "Assessment",
     "AssessmentAnswer",
+    "ChatSession",
+    "ChatMessage",
     "Favorite",
 ]
