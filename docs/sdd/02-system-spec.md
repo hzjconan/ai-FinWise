@@ -221,6 +221,7 @@ API 路径示例：`GET /products/WY-2025-001`，`GET /customers/CUS-20250409-00
 | risk_preference | VARCHAR(2) | NOT NULL | C1-C5 |
 | ai_summary | TEXT | | AI 评估摘要（AI 模式） |
 | ai_dimensions | JSON | | AI 维度评分（AI 模式） |
+| chat_session_id | BIGINT | FK → chat_sessions.id, NULL | AI 模式下关联的会话；问卷模式为 NULL（阶段二新增） |
 | created_at | TIMESTAMP | NOT NULL, DEFAULT NOW | 创建时间 |
 
 #### assessment_answers — 问卷评估作答记录
@@ -242,6 +243,37 @@ API 路径示例：`GET /products/WY-2025-001`，`GET /customers/CUS-20250409-00
 | created_at | TIMESTAMP | NOT NULL, DEFAULT NOW | 收藏时间 |
 
 **索引**: (customer_id, product_id) UNIQUE
+
+#### chat_sessions — AI 对话会话（阶段二）
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| id | BIGINT | PK, AUTO_INCREMENT | 主键（内部） |
+| code | VARCHAR(20) | UNIQUE, NOT NULL | 对外标识（CHAT-YYYYMMDD-NNN） |
+| customer_id | BIGINT | FK → customers.id, NOT NULL | 所属客户 |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'active' | active / completed / abandoned |
+| created_at | TIMESTAMP | NOT NULL, DEFAULT NOW | 创建时间 |
+| updated_at | TIMESTAMP | NOT NULL, DEFAULT NOW | 最近一次消息时间 |
+
+**索引**: (customer_id, status, created_at DESC) — 查最近未完成会话
+
+**约束**：每个 customer 同时最多 1 条 status='active' 的 session；新建时若已存在 active session，复用而非新建。
+
+#### chat_messages — 对话消息（阶段二）
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| id | BIGINT | PK, AUTO_INCREMENT | 主键（内部） |
+| session_id | BIGINT | FK → chat_sessions.id, NOT NULL | 所属会话 |
+| role | VARCHAR(20) | NOT NULL | user / assistant |
+| content | TEXT | NOT NULL | 消息文本 |
+| tool_use | JSON | NULL | assistant 消息的 tool_use 原始结构（含 name + input） |
+| tokens_in | INTEGER | NULL | 输入 token 数 |
+| tokens_out | INTEGER | NULL | 输出 token 数 |
+| latency_ms | INTEGER | NULL | LLM 响应延迟 |
+| created_at | TIMESTAMP | NOT NULL, DEFAULT NOW | 创建时间 |
+
+**索引**: (session_id, created_at) — 按会话顺序读
 
 ---
 
@@ -663,62 +695,73 @@ ORDER BY risk_level ASC, expected_return DESC;
 
 ### 3.6 客户端 — AI 对话评估（阶段二）
 
+> 详细设计见 `docs/sdd/03-ai-assessment-design.md`。本节定义对外 API 协议。
+
 #### POST /assessment/chat/start
-创建 AI 评估会话。
+创建新会话，或恢复客户最近 1 条 status='active' 的会话。
 
 **Request Body**:
 ```json
-{
-  "customer_code": "CUS-20250409-001"
-}
+{ "customer_code": "CUS-20260423-001" }
 ```
 
 **Response 200**:
 ```json
 {
-  "session_id": "ASM-20250409-002",
-  "message": {
-    "role": "assistant",
-    "content": "您好！我是您的理财风险评估助手。接下来我会问您几个问题，帮您了解自己的投资风格。请放轻松，没有标准答案。\n\n首先想请问，您之前有过投资理财的经验吗？比如购买过基金、股票或其他理财产品？"
-  }
+  "session_code": "CHAT-20260423-001",
+  "resumed": false,
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "您好！我是您的理财风险评估助手..."
+    }
+  ]
 }
 ```
 
-#### POST /assessment/chat/{assessment_code}/message
-发送用户消息，获取 AI 回复。
+- `resumed=true` 时 `messages` 为完整历史（按时间正序），客户端按顺序渲染
+- 新建会话时后端自动调用一次 LLM 生成开场白，作为首条 `assistant` 消息落盘
+
+#### POST /assessment/chat/{session_code}/message
+发送用户消息，**流式（SSE）** 获取 AI 回复。
 
 **Request Body**:
 ```json
-{
-  "content": "买过一些基金，但大部分是货币基金"
-}
+{ "content": "买过一些基金，但大部分是货币基金" }
 ```
 
-**Response 200**（对话中）:
-```json
-{
-  "message": {
-    "role": "assistant",
-    "content": "了解，货币基金确实是比较稳健的选择。那请问..."
-  },
-  "is_complete": false
-}
+**Response 200** — `Content-Type: text/event-stream`，事件序列：
+
+对话中（继续提问）：
+```
+event: delta
+data: {"content": "了解"}
+
+event: delta
+data: {"content": "，货币基金"}
+
+event: delta
+data: {"content": "确实是比较稳健..."}
+
+event: completed
+data: {"phase": "asking", "round": 3}
 ```
 
-**Response 200**（评估完成）:
-```json
-{
-  "message": {
-    "role": "assistant",
-    "content": "感谢您的耐心回答！根据我们的对话，我对您的投资风格有了比较清晰的了解..."
-  },
-  "is_complete": true,
+评估完成：
+```
+event: delta
+data: {"content": "感谢您的耐心回答..."}
+
+event: completed
+data: {
+  "phase": "concluded",
+  "round": 6,
   "assessment": {
-    "assessment_code": "ASM-20250409-002",
+    "assessment_code": "ASM-20260423-005",
     "source": "ai_chat",
     "risk_preference": "C2",
     "risk_label": "稳健型",
-    "ai_summary": "基于对话分析，您投资经验较少，偏好稳定收益...",
+    "ai_summary": "基于对话分析，您投资经验较少...",
     "ai_dimensions": {
       "experience": 2,
       "loss_tolerance": 2,
@@ -729,6 +772,27 @@ ORDER BY risk_level ASC, expected_return DESC;
   }
 }
 ```
+
+错误：
+```
+event: error
+data: {"code": "llm_unavailable", "message": "AI 暂时无法响应"}
+```
+
+**事件类型**：
+
+| event | 触发时机 | data 字段 |
+|---|---|---|
+| `delta` | 模型 content 文本增量 | `content`（字符串增量） |
+| `completed` | 一轮响应完成 | `phase`（asking/concluded）、`round`、`assessment`（concluded 时） |
+| `error` | LLM 调用失败（已自动重试 1 次） | `code`、`message` |
+
+#### POST /assessment/chat/{session_code}/restart
+放弃当前会话，新建一个会话。
+
+**行为**：当前 session `status='abandoned'`，新建一条 active session，自动生成开场白。
+
+**Response 200**：与 `/chat/start` 响应结构一致（`resumed=false`）。
 
 ---
 
