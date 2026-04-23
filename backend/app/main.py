@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import Base, engine
 from app.models import *  # noqa: F401, F403 — ensure all models are registered
 from app.routers import admin_products, admin_questions, assessment, auth, customers, products, recommendations
 from app.utils.auth import hash_password
@@ -46,10 +45,6 @@ def _check_security():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _check_security()
-    # In dev mode, auto-create tables for convenience.
-    # In prod, use: alembic upgrade head
-    if settings.ENV == "dev":
-        Base.metadata.create_all(bind=engine)
     seed_default_admin()
     yield
 

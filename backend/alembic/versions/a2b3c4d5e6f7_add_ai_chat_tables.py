@@ -33,7 +33,7 @@ def upgrade() -> None:
     op.create_index(
         "ix_chat_sessions_customer_status_created",
         "chat_sessions",
-        ["customer_id", "status", sa.text("created_at DESC")],
+        ["customer_id", "status", "created_at"],
     )
 
     op.create_table(

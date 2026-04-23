@@ -82,7 +82,16 @@ if [ $backend_src -eq 1 ] && [ $backend_test -eq 0 ]; then
 "
 fi
 
-[ -z "$missing" ] && exit 0
+alembic_drift=""
+if [ $backend_src -eq 1 ] && [ -f backend/.venv/bin/alembic ]; then
+  if ! drift_out=$(cd backend && ./.venv/bin/alembic check 2>&1); then
+    alembic_drift=$(printf '%s' "$drift_out" | tail -3)
+  fi
+fi
+
+if [ -z "$missing" ] && [ -z "$alembic_drift" ]; then
+  exit 0
+fi
 
 if [ "${CLAUDE_SKIP_TEST_CHECK:-}" = "1" ]; then
   echo "[check-tests] CLAUDE_SKIP_TEST_CHECK=1 跳过强制校验" >&2
@@ -90,14 +99,20 @@ if [ "${CLAUDE_SKIP_TEST_CHECK:-}" = "1" ]; then
 fi
 
 {
-  echo "❌ 测试缺失（Stop hook 拦截）— memory: feedback_testing_required"
+  echo "❌ Stop hook 拦截 — memory: feedback_testing_required"
   echo
   echo "改动源文件："
   printf '%s' "$src_list"
-  echo "缺测试项："
-  printf '%s' "$missing"
-  echo "请补齐对应 E2E / pytest 测试后重新结束本轮。"
-  echo "纯视觉/样式调整请向用户显式申请豁免，得到确认后可设置 CLAUDE_SKIP_TEST_CHECK=1 绕过。"
+  if [ -n "$missing" ]; then
+    echo "缺测试项："
+    printf '%s' "$missing"
+  fi
+  if [ -n "$alembic_drift" ]; then
+    echo "模型与迁移不一致（alembic check 失败）："
+    printf '%s\n' "$alembic_drift" | sed 's/^/  /'
+    echo "  → 在 backend/ 下跑 alembic revision --autogenerate -m \"...\"，或把模型改回与迁移一致。"
+  fi
+  echo "请修复后重新结束本轮。紧急绕过：CLAUDE_SKIP_TEST_CHECK=1。"
 } >&2
 
 exit 2

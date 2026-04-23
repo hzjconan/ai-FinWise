@@ -16,9 +16,9 @@ allowed-tools: Bash
 
 1. 使用 `lsof -ti :端口号` 检查相关端口是否被占用
 2. 如果被占用，使用 `kill -9 $(lsof -ti :端口号)` 杀掉占用进程
-3. 在后台启动后端服务器：
+3. 在后台启动后端服务器（脚本内部会先跑 `alembic upgrade head` 对齐 schema，再起 uvicorn）：
    ```
-   cd backend && source .venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   bash backend/scripts/dev.sh
    ```
 4. 在后台启动管理端前端：
    ```

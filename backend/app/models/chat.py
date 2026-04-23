@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -8,6 +8,14 @@ from app.database import Base
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
+    __table_args__ = (
+        Index(
+            "ix_chat_sessions_customer_status_created",
+            "customer_id",
+            "status",
+            "created_at",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
@@ -28,6 +36,9 @@ class ChatSession(Base):
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("ix_chat_messages_session_created", "session_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), nullable=False)
