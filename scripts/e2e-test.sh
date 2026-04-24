@@ -39,6 +39,7 @@ rm -f "$TEST_DB"
 echo "Starting backend with test database..."
 cd "$BACKEND_DIR"
 source .venv/bin/activate
+FINWISE_DATABASE_URL="sqlite:///./finwise_test.db" alembic upgrade head
 FINWISE_DATABASE_URL="sqlite:///./finwise_test.db" \
     uvicorn app.main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!

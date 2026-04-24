@@ -6,12 +6,12 @@ describe('Customer Risk Assessment', () => {
   });
 
   it('shows assessment questions', () => {
-    cy.visit('/assessment');
+    cy.visit('/assessment/questionnaire');
     cy.contains('第 1 /');
   });
 
   it('navigates between questions', () => {
-    cy.visit('/assessment');
+    cy.visit('/assessment/questionnaire');
     cy.get('.ant-radio-wrapper').first().click();
     cy.contains('button', '下一题').click();
     cy.contains('第 2 /');
@@ -20,7 +20,7 @@ describe('Customer Risk Assessment', () => {
   });
 
   it('requires selection before proceeding', () => {
-    cy.visit('/assessment');
+    cy.visit('/assessment/questionnaire');
     cy.contains('button', '下一题').click();
     cy.get('.ant-message').should('contain.text', '请选择一个选项');
   });
@@ -30,7 +30,7 @@ describe('Customer Risk Assessment', () => {
     cy.request('GET', '/api/v1/assessment/questions').then((resp) => {
       const questionCount = resp.body.length;
 
-      cy.visit('/assessment');
+      cy.visit('/assessment/questionnaire');
       // Answer all questions except the last one
       for (let i = 0; i < questionCount - 1; i++) {
         cy.get('.ant-radio-wrapper').first().click();

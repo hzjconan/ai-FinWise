@@ -5,7 +5,7 @@ import { getActiveQuestions, submitAssessment } from '../api/assessment';
 import type { Question } from '../api/assessment';
 import { useAuthStore } from '../stores/authStore';
 
-export default function Assessment() {
+export default function AssessmentQuestionnaire() {
   const navigate = useNavigate();
   const customerCode = useAuthStore((s) => s.customerCode);
   const [questions, setQuestions] = useState<Question[]>([]);
