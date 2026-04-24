@@ -24,19 +24,13 @@ from app.models.chat import ChatMessage, ChatSession
 from app.models.customer import Customer
 from app.services.llm.base import LLMClient
 from app.services.llm.events import LLMError, TextDelta, ToolResult
+from app.services.llm.prompts import load_system_prompt
 from app.services.risk_calculator import PREFERENCE_LABELS
 from app.utils.code_generator import generate_code
 
 # Tool 名称常量
 TOOL_ASK = "ask_next_question"
 TOOL_CONCLUDE = "conclude_assessment"
-
-# P1 阶段的 system prompt 与 tools 定义占位——P2 接入真实 LLM 时换成
-# 从 backend/prompts/ 配置文件加载 + prompt caching 拆分
-SYSTEM_PROMPT_PLACEHOLDER = (
-    "你是 FinWise 平台的理财风险评估助手。通过 5–8 轮对话评估客户的风险偏好。"
-    "每轮必须调用 ask_next_question 或 conclude_assessment 工具之一。"
-)
 
 TOOLS_SCHEMA: list[dict] = [
     {
@@ -175,7 +169,7 @@ async def generate_opening(
     try:
         text, tool_result, llm_error, _ = await _call_llm_with_retry(
             llm,
-            system=SYSTEM_PROMPT_PLACEHOLDER,
+            system=load_system_prompt(),
             messages=[],
             tools=TOOLS_SCHEMA,
         )
@@ -226,7 +220,7 @@ async def handle_user_message(
     try:
         text, tool_result, llm_error, deltas = await _call_llm_with_retry(
             llm,
-            system=SYSTEM_PROMPT_PLACEHOLDER,
+            system=load_system_prompt(),
             messages=new_messages,
             tools=TOOLS_SCHEMA,
         )
