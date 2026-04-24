@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import *  # noqa: F401, F403 — ensure all models are registered
-from app.routers import admin_products, admin_questions, assessment, auth, customers, products, recommendations
+from app.routers import admin_products, admin_questions, assessment, auth, chat, customers, products, recommendations
 from app.utils.auth import hash_password
 from app.config import settings
 
@@ -64,5 +64,6 @@ app.include_router(admin_products.router, prefix="/api/v1/admin/products", tags=
 app.include_router(admin_questions.router, prefix="/api/v1/admin/questions", tags=["管理端-问卷"])
 app.include_router(products.router, prefix="/api/v1/products", tags=["客户端-产品"])
 app.include_router(assessment.router, prefix="/api/v1/assessment", tags=["客户端-评估"])
+app.include_router(chat.router, prefix="/api/v1/assessment/chat", tags=["客户端-AI 对话评估"])
 app.include_router(recommendations.router, prefix="/api/v1/recommendations", tags=["客户端-推荐"])
 app.include_router(customers.router, prefix="/api/v1/customers", tags=["客户端-客户"])
