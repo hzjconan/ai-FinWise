@@ -103,6 +103,13 @@ describe('Customer AI Chat Assessment', () => {
     cy.url().should('include', '/assessment/result');
     cy.contains('您的风险偏好');
     cy.contains('平衡型');
+
+    // AI 模式应渲染摘要与维度条形
+    cy.get('[data-cy="ai-summary"]').should('contain.text', '综合判断为平衡型');
+    cy.get('[data-cy="ai-dimensions"]').should('be.visible');
+    cy.get('[data-cy="ai-dim-experience"]').should('contain.text', '投资经验').and('contain.text', '3');
+    cy.get('[data-cy="ai-dim-loss_tolerance"]').should('contain.text', '损失承受');
+    cy.get('[data-cy="ai-dim-volatility_tolerance"]').should('contain.text', '波动态度');
   });
 
   it('shows retry button on SSE error event', () => {

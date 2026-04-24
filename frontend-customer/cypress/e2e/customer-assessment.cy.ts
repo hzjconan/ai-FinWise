@@ -42,6 +42,9 @@ describe('Customer Risk Assessment', () => {
 
       cy.url().should('include', '/assessment/result');
       cy.contains('您的风险偏好');
+      // 问卷模式不应渲染 AI 专属的摘要/维度卡片
+      cy.get('[data-cy="ai-summary"]').should('not.exist');
+      cy.get('[data-cy="ai-dimensions"]').should('not.exist');
     });
   });
 });

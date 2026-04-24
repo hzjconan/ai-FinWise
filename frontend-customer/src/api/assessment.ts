@@ -23,6 +23,8 @@ export interface AssessmentResult {
   risk_preference: string;
   risk_label: string;
   description: string;
+  ai_summary?: string | null;
+  ai_dimensions?: Record<string, number> | null;
 }
 
 export interface RecommendedProduct {
