@@ -239,11 +239,15 @@ async def handle_user_message(
         }
         return
 
-    # 逐条吐 delta
-    for delta in deltas:
-        yield {"event": "delta", "data": {"content": delta.text}}
-
     assistant_content = tool_result.input.get("content") or text
+
+    # 逐条吐 delta；若流里没有 text_delta（典型真实场景：模型直接输出 tool_use），
+    # 把 tool input 的 content 作为单个 delta 兜底，避免前端拿到空白气泡。
+    if deltas:
+        for delta in deltas:
+            yield {"event": "delta", "data": {"content": delta.text}}
+    elif assistant_content:
+        yield {"event": "delta", "data": {"content": assistant_content}}
 
     # 持久化 user + assistant 消息
     user_msg = ChatMessage(session_id=session.id, role="user", content=user_content)

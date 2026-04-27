@@ -246,6 +246,24 @@ def test_handle_user_message_conclude_creates_assessment(db):
     assert float(a.normalized_score) == 80.0
 
 
+def test_handle_user_message_no_deltas_uses_tool_content_as_delta(db):
+    """真实 LLM 直接走 tool_use 时，stream 里可能 0 个 text_delta。
+    应把 tool input.content 作为单个 delta 吐出，避免前端空白气泡。"""
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    # 注意：这里只有 ToolResult，没有 TextDelta
+    llm = MockLLMClient([[
+        ToolResult(name=chat_service.TOOL_ASK, input={"content": "下一轮的问题文本"}),
+    ]])
+
+    events = _run(_collect(chat_service.handle_user_message(db, session, "我答 A1", llm)))
+    delta_events = [e for e in events if e["event"] == "delta"]
+    assert len(delta_events) == 1
+    assert delta_events[0]["data"]["content"] == "下一轮的问题文本"
+    completed = [e for e in events if e["event"] == "completed"]
+    assert len(completed) == 1 and completed[0]["data"]["phase"] == "asking"
+
+
 def test_handle_user_message_llm_error_yields_error_event_and_does_not_persist(db):
     customer = _make_customer(db)
     session = chat_service.create_session(db, customer.id)
