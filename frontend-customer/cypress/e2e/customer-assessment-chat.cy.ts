@@ -19,26 +19,32 @@ describe('Customer AI Chat Assessment', () => {
     cy.url().should('include', '/assessment/questionnaire');
   });
 
-  it('renders opening message from /start', () => {
-    cy.intercept('POST', '/api/v1/assessment/chat/start', {
-      statusCode: 200,
-      body: {
-        session_code: 'CHAT-TEST-001',
-        resumed: false,
-        messages: [
-          {
-            role: 'assistant',
-            content: '您好！请问您有投资经验吗？',
-            created_at: new Date().toISOString(),
-          },
-        ],
-      },
+  it('renders opening message from /start and calls it only once', () => {
+    let startCalls = 0;
+    cy.intercept('POST', '/api/v1/assessment/chat/start', (req) => {
+      startCalls += 1;
+      req.reply({
+        statusCode: 200,
+        body: {
+          session_code: 'CHAT-TEST-001',
+          resumed: false,
+          messages: [
+            {
+              role: 'assistant',
+              content: '您好！请问您有投资经验吗？',
+              created_at: new Date().toISOString(),
+            },
+          ],
+        },
+      });
     }).as('start');
 
     cy.visit('/assessment/chat');
     cy.wait('@start');
     cy.get('[data-cy="msg-assistant"]').should('contain.text', '请问您有投资经验吗');
     cy.get('[data-cy="chat-progress"]').should('contain.text', '已对话 0 轮');
+    // StrictMode 下 effect 会跑两次：守卫确保 /start 只调用一次
+    cy.wait(300).then(() => expect(startCalls).to.eq(1));
   });
 
   it('sends message, streams delta, and increments round', () => {

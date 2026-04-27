@@ -27,12 +27,16 @@ export default function AssessmentChat() {
   const [lastUserContent, setLastUserContent] = useState<string | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
+  const startedRef = useRef(false);
 
   useEffect(() => {
     if (!customerCode) {
       setStarting(false);
       return;
     }
+    // 守卫：StrictMode dev 下 effect 会跑两次，防止重复触发 /chat/start
+    if (startedRef.current) return;
+    startedRef.current = true;
     startChat(customerCode)
       .then(({ data }) => {
         setSessionCode(data.session_code);
