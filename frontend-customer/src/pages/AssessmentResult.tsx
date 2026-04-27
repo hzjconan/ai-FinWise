@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Card, Progress, Result } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { AssessmentResult, Recommendations, RecommendedProduct } from '../api/assessment';
@@ -21,11 +21,14 @@ export default function AssessmentResultPage() {
   const result = location.state as AssessmentResult | undefined;
   const customerCode = useAuthStore((s) => s.customerCode);
   const [recs, setRecs] = useState<Recommendations | null>(null);
+  const fetchedForRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (customerCode) {
-      getRecommendations(customerCode).then(({ data }) => setRecs(data)).catch(() => {});
-    }
+    if (!customerCode) return;
+    // StrictMode dev 下 effect 会跑两次：按 customerCode 去重，避免重复调推荐 API
+    if (fetchedForRef.current === customerCode) return;
+    fetchedForRef.current = customerCode;
+    getRecommendations(customerCode).then(({ data }) => setRecs(data)).catch(() => {});
   }, [customerCode]);
 
   if (!result) {

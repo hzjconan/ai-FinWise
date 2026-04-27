@@ -81,6 +81,40 @@ describe('Customer AI Chat Assessment', () => {
     cy.get('[data-cy="chat-progress"]').should('contain.text', '已对话 1 轮');
   });
 
+  it('result page calls /recommendations only once', () => {
+    cy.intercept('POST', '/api/v1/assessment/chat/start', {
+      statusCode: 200,
+      body: {
+        session_code: 'CHAT-TEST-007',
+        resumed: false,
+        messages: [
+          { role: 'assistant', content: '开场白', created_at: new Date().toISOString() },
+        ],
+      },
+    });
+    cy.intercept('POST', '/api/v1/assessment/chat/CHAT-TEST-007/message', {
+      statusCode: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+      body:
+        'event: completed\ndata: {"phase":"concluded","round":5,"assessment":{"assessment_code":"ASM-T-007","source":"ai_chat","risk_preference":"C3","risk_label":"平衡型","ai_summary":"S","ai_dimensions":{"experience":3,"loss_tolerance":3,"income_stability":3,"investment_horizon":3,"volatility_tolerance":3}}}\n\n',
+    });
+
+    let recCalls = 0;
+    cy.intercept('GET', '/api/v1/recommendations*', (req) => {
+      recCalls += 1;
+      req.reply({
+        statusCode: 200,
+        body: { risk_preference: 'C3', risk_label: '平衡型', exact_matches: [], adjacent_matches: [] },
+      });
+    });
+
+    cy.visit('/assessment/chat');
+    cy.get('[data-cy="chat-input"]').type('好的');
+    cy.get('[data-cy="chat-send"]').click();
+    cy.url().should('include', '/assessment/result');
+    cy.wait(400).then(() => expect(recCalls).to.eq(1));
+  });
+
   it('navigates to result page when LLM concludes', () => {
     cy.intercept('POST', '/api/v1/assessment/chat/start', {
       statusCode: 200,
