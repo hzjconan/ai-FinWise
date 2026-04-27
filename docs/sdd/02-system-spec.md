@@ -877,27 +877,26 @@ data: {"code": "llm_unavailable", "message": "AI 暂时无法响应"}
 #### GET /customers/{customer_code}/assessments
 获取客户历史评估记录。
 
-**Response 200**:
+**Response 200**：返回评估记录数组（按 `created_at` 倒序）。
+
 ```json
-{
-  "items": [
-    {
-      "code": "ASM-20250310-001",
-      "source": "questionnaire",
-      "risk_preference": "C3",
-      "risk_label": "平衡型",
-      "created_at": "2025-03-10T14:30:00Z"
-    },
-    {
-      "code": "ASM-20250315-001",
-      "source": "ai_chat",
-      "risk_preference": "C2",
-      "risk_label": "稳健型",
-      "ai_summary": "基于对话分析...",
-      "created_at": "2025-03-15T09:20:00Z"
-    }
-  ]
-}
+[
+  {
+    "code": "ASM-20250315-001",
+    "source": "ai_chat",
+    "risk_preference": "C2",
+    "risk_label": "稳健型",
+    "ai_summary": "基于对话分析...",
+    "created_at": "2025-03-15T09:20:00Z"
+  },
+  {
+    "code": "ASM-20250310-001",
+    "source": "questionnaire",
+    "risk_preference": "C3",
+    "risk_label": "平衡型",
+    "created_at": "2025-03-10T14:30:00Z"
+  }
+]
 ```
 
 ---
