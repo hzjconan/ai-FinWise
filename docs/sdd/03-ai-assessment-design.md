@@ -69,7 +69,7 @@ async with client.messages.stream(
 
 | 环境 | `ANTHROPIC_BASE_URL` | `ANTHROPIC_API_KEY` | 后端 LLM 流量去向 |
 |---|---|---|---|
-| dev | `http://localhost:8787/v1` | `fake` | claude-cli-bridge → Claude CLI |
+| dev | `http://localhost:8787` | `fake` | claude-cli-bridge → Claude CLI |
 | prod | （默认值，连官方） | 真实 key | api.anthropic.com |
 
 测试环境完全不走真实 SDK：用 `respx` 或类似工具拦截 HTTP，或在更高层 mock `anthropic.Anthropic` 客户端。
@@ -374,7 +374,7 @@ messages = [
 
 - `LLM_PROVIDER=cli`（dev 默认）：`/dev-server` 在端口 8787 拉起 bridge
 - `LLM_PROVIDER=api`：跳过 bridge 启动
-- 后端 `.env.dev` 默认设置 `LLM_PROVIDER=cli` + `ANTHROPIC_BASE_URL=http://localhost:8787/v1` + `ANTHROPIC_API_KEY=fake`
+- 后端 `.env.dev` 默认设置 `LLM_PROVIDER=api` + `ANTHROPIC_BASE_URL=http://localhost:8787` + `ANTHROPIC_API_KEY=fake`（base URL 不带 `/v1`，SDK 会自动追加）
 
 ### 7.4 目录结构
 

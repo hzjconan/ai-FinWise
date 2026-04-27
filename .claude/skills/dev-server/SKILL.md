@@ -21,6 +21,8 @@ allowed-tools: Bash
    ```
    cd tools/claude-cli-bridge && .venv/bin/uvicorn claude_cli_bridge.main:app --port 8787
    ```
+   后端环境需配套设置 `ANTHROPIC_BASE_URL=http://localhost:8787`（**不要带 `/v1`**，SDK 自动追加）和
+   `ANTHROPIC_API_KEY=fake`。
 4. 在后台启动后端服务器（脚本内部会先跑 `alembic upgrade head` 对齐 schema，再起 uvicorn）：
    ```
    bash backend/scripts/dev.sh

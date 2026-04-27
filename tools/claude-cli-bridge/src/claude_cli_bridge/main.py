@@ -3,7 +3,7 @@
 启动：
   uvicorn claude_cli_bridge.main:app --port 8787
 
-业务后端把 ANTHROPIC_BASE_URL 指向这里（例如 http://localhost:8787/v1），即可让
+业务后端把 ANTHROPIC_BASE_URL 指向这里（例如 http://localhost:8787，不带 /v1），即可让
 Anthropic SDK 的请求路由到本地 Claude CLI。
 """
 from fastapi import FastAPI

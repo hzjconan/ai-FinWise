@@ -31,7 +31,7 @@ cd "$BRIDGE_DIR"
 BRIDGE_PID=$!
 
 for i in $(seq 1 20); do
-    if curl -sf "http://localhost:$PORT/healthz" >/dev/null; then
+    if curl -sf --noproxy '*' "http://localhost:$PORT/healthz" >/dev/null; then
         echo "[smoke] bridge ready"
         break
     fi
@@ -41,9 +41,10 @@ done
 
 # 3) 用 Anthropic SDK 走一轮（依赖 backend venv 已装 anthropic）
 echo "[smoke] running 1-round chat through SDK ..."
+NO_PROXY="localhost,127.0.0.1" no_proxy="localhost,127.0.0.1" \
 "$REPO_ROOT/backend/.venv/bin/python" - <<PYEOF
 import asyncio, os, sys
-os.environ["ANTHROPIC_BASE_URL"] = "http://localhost:$PORT/v1"
+os.environ["ANTHROPIC_BASE_URL"] = "http://localhost:$PORT"
 os.environ["ANTHROPIC_API_KEY"] = "fake"
 from anthropic import AsyncAnthropic
 
