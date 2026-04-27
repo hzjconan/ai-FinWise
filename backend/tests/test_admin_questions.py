@@ -53,6 +53,28 @@ class TestUpdateQuestion:
         assert resp.status_code == 404
 
 
+class TestSortQuestions:
+    def test_sort_updates_orders(self, client, auth_header, sample_questions):
+        ids = [q["id"] for q in sample_questions]
+        # 把两题反过来：第一题 sort_order=2，第二题 sort_order=1
+        resp = client.put("/api/v1/admin/questions/sort", json={
+            "orders": [
+                {"id": ids[0], "sort_order": 2},
+                {"id": ids[1], "sort_order": 1},
+            ],
+        }, headers=auth_header)
+        assert resp.status_code == 200, resp.text  # 路由顺序坑：/sort 必须在 /{id} 前
+
+        listing = client.get("/api/v1/admin/questions", headers=auth_header).json()
+        assert listing[0]["id"] == ids[1]
+        assert listing[1]["id"] == ids[0]
+
+    def test_sort_route_not_caught_by_id_param(self, client, auth_header):
+        """回归：曾因 /{question_id} 先注册导致 PUT /sort 被解析为 question_id=sort 返回 422。"""
+        resp = client.put("/api/v1/admin/questions/sort", json={"orders": []}, headers=auth_header)
+        assert resp.status_code == 200
+
+
 class TestDeleteQuestion:
     def test_delete_success(self, client, auth_header, sample_questions):
         qid = sample_questions[0]["id"]

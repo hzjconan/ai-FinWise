@@ -35,6 +35,21 @@ def create_question(
     return QuestionOut.model_validate(question)
 
 
+# 注意：`/sort` 必须声明在 `/{question_id}` 之前，否则会被路径参数捕获导致 422
+@router.put("/sort", status_code=200)
+def update_sort_order(
+    data: SortOrderRequest,
+    db: Session = Depends(get_db),
+    _admin: Admin = Depends(get_current_admin),
+):
+    for item in data.orders:
+        q = db.query(Question).filter(Question.id == item.id).first()
+        if q:
+            q.sort_order = item.sort_order
+    db.commit()
+    return {"ok": True}
+
+
 @router.put("/{question_id}", response_model=QuestionOut)
 def update_question(
     question_id: int,
@@ -70,17 +85,3 @@ def delete_question(
         raise HTTPException(status_code=404, detail="题目不存在")
     db.delete(question)
     db.commit()
-
-
-@router.put("/sort", status_code=200)
-def update_sort_order(
-    data: SortOrderRequest,
-    db: Session = Depends(get_db),
-    _admin: Admin = Depends(get_current_admin),
-):
-    for item in data.orders:
-        q = db.query(Question).filter(Question.id == item.id).first()
-        if q:
-            q.sort_order = item.sort_order
-    db.commit()
-    return {"ok": True}
