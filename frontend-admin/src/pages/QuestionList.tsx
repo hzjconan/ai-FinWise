@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Button, Card, Form, Input, InputNumber, List, Modal, Space, Tag, Tooltip, message, Popconfirm,
+  Button, Card, Drawer, Form, Input, InputNumber, List, Modal, Radio, Space, Tag, Tooltip,
+  message, Popconfirm,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined, DeleteOutlined, EditOutlined, QuestionCircleOutlined, EyeOutlined,
+  HolderOutlined,
+} from '@ant-design/icons';
 import {
   adminListQuestions, adminCreateQuestion, adminUpdateQuestion, adminDeleteQuestion,
-  type Question,
+  adminSortQuestions, type Question,
 } from '../api/questions';
 
 interface OptionForm {
@@ -16,8 +20,10 @@ interface OptionForm {
 export default function QuestionList() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [editing, setEditing] = useState<Question | null>(null);
   const [form] = Form.useForm();
+  const dragIndexRef = useRef<number | null>(null);
 
   const load = () => {
     adminListQuestions().then(({ data }) => setQuestions(data));
@@ -36,7 +42,6 @@ export default function QuestionList() {
     setEditing(q);
     form.setFieldsValue({
       content: q.content,
-      sort_order: q.sort_order,
       options: q.options.map((o) => ({ content: o.content, score: o.score })),
     });
     setModalOpen(true);
@@ -44,12 +49,16 @@ export default function QuestionList() {
 
   const onSave = async () => {
     const values = await form.validateFields();
+    // sort_order 由列表顺序决定，新建时追加到末尾
+    const sort_order = editing
+      ? editing.sort_order
+      : Math.max(0, ...questions.map((q) => q.sort_order)) + 1;
     try {
       if (editing) {
-        await adminUpdateQuestion(editing.id, values);
+        await adminUpdateQuestion(editing.id, { ...values, sort_order });
         message.success('题目已更新');
       } else {
-        await adminCreateQuestion(values);
+        await adminCreateQuestion({ ...values, sort_order });
         message.success('题目已创建');
       }
       setModalOpen(false);
@@ -65,24 +74,81 @@ export default function QuestionList() {
     load();
   };
 
+  const onDrop = async (dropIndex: number) => {
+    const fromIndex = dragIndexRef.current;
+    dragIndexRef.current = null;
+    if (fromIndex === null || fromIndex === dropIndex) return;
+
+    const reordered = [...questions];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(dropIndex, 0, moved);
+
+    // 乐观更新 UI 顺序 + 重写 sort_order
+    const withOrders = reordered.map((q, i) => ({ ...q, sort_order: i + 1 }));
+    setQuestions(withOrders);
+
+    try {
+      await adminSortQuestions(
+        withOrders.map((q) => ({ id: q.id, sort_order: q.sort_order })),
+      );
+    } catch (err: any) {
+      message.error(err.response?.data?.detail ?? '排序失败');
+      load();
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2>问卷管理</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openNew}>新增题目</Button>
+        <Space>
+          <Button
+            icon={<EyeOutlined />}
+            onClick={() => setPreviewOpen(true)}
+            disabled={questions.length === 0}
+            data-cy="preview-btn"
+          >
+            预览
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openNew}>
+            新增题目
+          </Button>
+        </Space>
       </div>
+
+      <p style={{ color: '#999', fontSize: 12, marginBottom: 8 }}>
+        提示：拖拽题目卡片左侧的 <HolderOutlined /> 图标可调整顺序
+      </p>
 
       <List
         dataSource={questions}
-        renderItem={(q) => (
-          <Card style={{ marginBottom: 12 }} size="small">
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <div>
-                <strong>Q{q.sort_order}. {q.content}</strong>
-                <div style={{ marginTop: 8 }}>
-                  {q.options.map((o) => (
-                    <Tag key={o.id}>{o.content}（{o.score}分）</Tag>
-                  ))}
+        renderItem={(q, index) => (
+          <Card
+            key={q.id}
+            data-cy={`question-card-${q.id}`}
+            style={{ marginBottom: 12 }}
+            size="small"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={() => onDrop(index)}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
+                <span
+                  draggable
+                  onDragStart={() => { dragIndexRef.current = index; }}
+                  data-cy={`drag-handle-${q.id}`}
+                  style={{ cursor: 'grab', color: '#999', fontSize: 18, padding: 4 }}
+                  title="拖拽排序"
+                >
+                  <HolderOutlined />
+                </span>
+                <div>
+                  <strong>Q{q.sort_order}. {q.content}</strong>
+                  <div style={{ marginTop: 8 }}>
+                    {q.options.map((o) => (
+                      <Tag key={o.id}>{o.content}（{o.score}分）</Tag>
+                    ))}
+                  </div>
                 </div>
               </div>
               <Space>
@@ -106,9 +172,6 @@ export default function QuestionList() {
         <Form form={form} layout="vertical">
           <Form.Item name="content" label="题目内容" rules={[{ required: true }]}>
             <Input.TextArea rows={2} />
-          </Form.Item>
-          <Form.Item name="sort_order" label="排序" initialValue={0}>
-            <InputNumber min={0} />
           </Form.Item>
           <Form.List name="options">
             {(fields, { add, remove }) => (
@@ -140,6 +203,42 @@ export default function QuestionList() {
           </Form.List>
         </Form>
       </Modal>
+
+      <Drawer
+        title="问卷预览（客户视角）"
+        placement="right"
+        width={520}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        data-cy="preview-drawer"
+      >
+        <p style={{ color: '#999', marginBottom: 16 }}>
+          仅用于预览，选项不会保存。
+        </p>
+        {questions.map((q, i) => (
+          <Card
+            key={q.id}
+            size="small"
+            title={`第 ${i + 1} 题 / 共 ${questions.length} 题`}
+            style={{ marginBottom: 16 }}
+          >
+            <h4 style={{ marginBottom: 12 }}>{q.content}</h4>
+            <Radio.Group style={{ width: '100%' }}>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                {q.options.map((o) => (
+                  <Radio
+                    key={o.id}
+                    value={o.id}
+                    style={{ display: 'block', padding: '4px 0' }}
+                  >
+                    {o.content}
+                  </Radio>
+                ))}
+              </Space>
+            </Radio.Group>
+          </Card>
+        ))}
+      </Drawer>
     </div>
   );
 }
