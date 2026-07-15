@@ -24,8 +24,10 @@ ANSWER_TOOL = {
     "description": "用一段话回答用户的问题。",
     "input_schema": {
         "type": "object",
-        "properties": {"answer": {"type": "string"}},
-        "required": ["answer"],
+        # "properties": {"answer": {"type": "string"}},
+        # "required": ["answer"],
+        "properties": {"answer": {"type": "string"}, "analogy_target": {"type": "string"}},
+        "required": ["answer", "analogy_target"],
     },
 }
 
@@ -34,11 +36,14 @@ async def main() -> None:
     client = make_client()
 
     # system：设定模型的角色/规则，不属于对话本身。
-    system = "你是一位耐心的编程导师，擅长用类比向工程师解释 AI 概念。"
+    # system = "你是一位耐心的编程导师，擅长用类比向工程师解释 AI 概念。"
+    system = "你是一位耐心的编程导师，擅长用类比向工程师解释 AI 概念。请用一句话解释。"
 
     # messages：对话历史。role 只能是 user / assistant。
     messages = [
-        {"role": "user", "content": "用一个类比向有经验的后端工程师解释：什么是 LLM 的 context window？"}
+        {"role": "user", "content": "用一个类比向有经验的后端工程师解释：什么是 LLM 的 context window？"},
+        {"role": "assistant", "content": "Context window 就像 HTTP 请求里那个一次性打包发过去的 payload——LLM 本身是完全无状态的，它不像数据库那样「记得」你之前说过什么，每次调用你都得把整段对话历史重新塞进这个固定大小的 payload 里，一旦超过上限（比如 200K token），最早的内容就得被你自己截断丢弃，模型就真的「看不见」它了。"},
+        {"role": "user", "content": "那随着对话的增长，token就是超过了上限怎么办？在大项目中如何解决这类问题？"}
     ]
 
     section("请求参数")
@@ -66,6 +71,9 @@ async def main() -> None:
             print()
             print("→ answer 字段内容：")
             print(block.input.get("answer"))
+            print()
+            print("→ analogy_target 字段内容：")
+            print(block.input.get("analogy_target"))
 
     # ---- 练习 TODO（改完重跑，观察变化）----
     # 1. 把 system 改成「你只会用一句话回答」，看回答长度是否变化。
