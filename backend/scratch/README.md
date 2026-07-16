@@ -40,6 +40,7 @@ cd backend
 | 纯文本回答 | ❌ | 硬性要求工具 JSON |
 | 真实 token 计数 | ❌ | usage 恒为 0 |
 | temperature | ❌ | 参数被忽略 |
+| max_tokens 截断 | ❌ | 参数被接住但从不转发给 CLI，回答不会被截断，stop_reason 恒为 tool_use |
 | 合法 JSON 保证 | ⚠️ | 偶发「格式跑偏」（未转义引号等），脚本已用重试 + 优雅降级处理 |
 
 代理注意：本机设了 `HTTP_PROXY=127.0.0.1:8002`，会劫持发往 localhost 的请求。
@@ -52,6 +53,7 @@ cd backend
 - **真实 token 用量 / 成本量级**（`s1_02` 里 usage=0）。
 - **temperature / top_p 采样对照实验**。
 - **纯文本对话**（不带 tool 的自由回答）。
+- **`max_tokens` 截断**（`s1_02` TODO#1）：bridge 吞掉 `max_tokens`，回答不会被截断、`stop_reason` 也不会变成 `max_tokens`；真实 API 上把 `max_tokens` 调小会看到回答硬截断 + `stop_reason == "max_tokens"`。
 
 切真实 API：设 `ANTHROPIC_API_KEY`，把 `_bridge.py::BRIDGE_BASE_URL` 去掉（用官方默认地址）。
 
