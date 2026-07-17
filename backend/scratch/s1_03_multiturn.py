@@ -48,8 +48,22 @@ async def main() -> None:
         {"role": "user", "content": "你好，我叫阿康，是个后端工程师。"},
         {"role": "assistant", "content": "你好阿康！很高兴认识你。"},
         {"role": "user", "content": "我叫什么名字？我的职业是什么？"},
+        
+        # 练习1 加几轮，问一个只有靠前几轮才知道答案的问题
+        {"role": "assistant", "content": "你叫阿康，职业是后端工程师。"},
+        {"role": "user", "content": "我喜欢吃青菜"},
+        {"role": "assistant", "content": "好的，记住啦，阿康喜欢吃青菜"},
+        {"role": "user", "content": "我喜欢打羽毛球"},
+        {"role": "assistant", "content": "好的，阿康！记住啦——你喜欢打羽毛球。"},
+        {"role": "user", "content": "我喜欢什么食物？"}
     ]
-    print("→", await ask(client, history))
+    # 练习2 砍历史，看模型「何时」开始失忆——并排对比"还记得的"vs"刚失忆的"两刀。
+    # 「青菜」这条食物信息只在 [4][5] 两轮（=倒数第 5、第 4 条）：
+    #   history[-5:] 含 [4] → 还记得；history[-3:] 砍到 [6:] → 不含青菜 → 失忆。
+    # 转折点就在 -4 与 -3 之间。
+    print("→ 完整历史      :", await ask(client, history))
+    print("→ 后5条(含青菜) :", await ask(client, history[-5:]))   # 应答对
+    print("→ 后3条(砍青菜) :", await ask(client, history[-3:]))   # 应失忆
 
     # 场景 B：不带历史，直接问同一个问题。模型无从得知。
     section("B. 不带历史（只发最后一个问题）")
