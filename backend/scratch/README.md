@@ -48,12 +48,13 @@ cd backend
 
 ## 「需真 key」才能练的部分
 
-以下阶段一目标 bridge 覆盖不了，拿到真实 `ANTHROPIC_API_KEY` 后再练（各脚本文末有说明）：
+以下目标 bridge 覆盖不了，拿到真实 `ANTHROPIC_API_KEY` 后再练（各脚本文末/TODO 处有说明）：
 
 - **真实 token 用量 / 成本量级**（`s1_02` 里 usage=0）。
 - **temperature / top_p 采样对照实验**。
 - **纯文本对话**（不带 tool 的自由回答）。
 - **`max_tokens` 截断**（`s1_02` TODO#1）：bridge 吞掉 `max_tokens`，回答不会被截断、`stop_reason` 也不会变成 `max_tokens`；真实 API 上把 `max_tokens` 调小会看到回答硬截断 + `stop_reason == "max_tokens"`。
+- **删「必须调用工具」看输出稳定性**（`s2_02` TODO#2）：bridge 在 prompt_builder 里硬加「必须只输出工具 JSON」并强制解析工具调用，无视你的 system 指令，所以删掉那句也没差别；真实 API（tool_choice=auto）上删掉后模型可能改用自由文本、不调工具，导致结构化输出不稳定。真正的硬保证是 `tool_choice`，不是 system 里的一句话。
 
 切真实 API：设 `ANTHROPIC_API_KEY`，把 `_bridge.py::BRIDGE_BASE_URL` 去掉（用官方默认地址）。
 
