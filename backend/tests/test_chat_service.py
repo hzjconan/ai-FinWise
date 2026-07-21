@@ -323,6 +323,29 @@ def test_handle_user_message_missing_tool_result_yields_error(db):
     assert events[-1]["data"]["code"] == "invalid_response"
 
 
+# ---------- 改造护栏：终态工具应恰好 1 次 LLM 调用（不循环）----------
+# 现有 handle_user_message 每条用户消息只调一次 LLM。阶段三②要把它改成带 MAX_STEPS 的
+# while 循环（引入可执行工具 search_products 时才多轮）。这两个测试显式钉死「终态工具
+# ask/conclude 只触发一次 LLM 调用、随即终止」——改造若让终态路径误多转一轮，会立刻变红。
+
+def test_handle_user_message_asking_makes_single_llm_call(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([_ask_events("单轮提问")])
+
+    _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    assert len(llm.calls) == 1
+
+
+def test_handle_user_message_conclude_makes_single_llm_call(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([_conclude_events()])
+
+    _run(_collect(chat_service.handle_user_message(db, session, "我追求高收益", llm)))
+    assert len(llm.calls) == 1
+
+
 def test_count_user_rounds(db):
     customer = _make_customer(db)
     session = chat_service.create_session(db, customer.id)
