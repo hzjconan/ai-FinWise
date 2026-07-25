@@ -323,6 +323,48 @@ def test_handle_user_message_missing_tool_result_yields_error(db):
     assert events[-1]["data"]["code"] == "invalid_response"
 
 
+# ---------- 阶段三② 步骤2：_execute_tool（search_products 复用产品查询）----------
+
+def _make_product(db, code, name, risk_level, ret, status="active", ptype="混合基金"):
+    from decimal import Decimal
+
+    from app.models.product import Product
+    p = Product(product_code=code, name=name, type=ptype, status=status,
+                risk_level=risk_level, expected_return=Decimal(str(ret)))
+    db.add(p)
+    return p
+
+
+def test_execute_search_products_returns_active_products_by_risk_level(db):
+    _make_product(db, "P-C4-A", "成长精选混合", "C4", "0.085")
+    _make_product(db, "P-C4-B", "科技行业ETF", "C4", "0.112", ptype="ETF")
+    _make_product(db, "P-C1", "稳盈货币A", "C1", "0.021")          # 别的等级 → 应排除
+    _make_product(db, "P-C4-D", "草稿产品", "C4", "0.090", status="draft")  # 非 active → 应排除
+    db.commit()
+
+    result = chat_service._execute_tool(db, chat_service.TOOL_SEARCH, {"risk_level": "C4"})
+
+    assert result["risk_level"] == "C4"
+    names = [p["name"] for p in result["products"]]
+    # 只返回 C4 且 active，按 expected_return 降序
+    assert names == ["科技行业ETF", "成长精选混合"]
+    # 精简字段（控制 token）
+    assert set(result["products"][0].keys()) == {"product_code", "name", "type", "expected_return"}
+    assert result["products"][0]["expected_return"] == 0.112
+
+
+def test_execute_search_products_empty_when_no_match(db):
+    _make_product(db, "P-C1", "稳盈货币A", "C1", "0.021")
+    db.commit()
+    result = chat_service._execute_tool(db, chat_service.TOOL_SEARCH, {"risk_level": "C5"})
+    assert result == {"risk_level": "C5", "products": []}
+
+
+def test_execute_tool_unknown_raises(db):
+    with pytest.raises(ValueError, match="未知可执行工具"):
+        chat_service._execute_tool(db, "no_such_tool", {})
+
+
 # ---------- 阶段三② 步骤1：工具分类（可执行 vs 终态）----------
 
 def test_tool_classification_terminal_vs_executable():

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.models.assessment import Assessment
 from app.models.chat import ChatMessage, ChatSession
 from app.models.customer import Customer
+from app.models.product import Product
 from app.services.llm.base import LLMClient
 from app.services.llm.events import LLMError, TextDelta, ToolResult
 from app.services.llm.prompts import load_system_prompt
@@ -79,6 +80,37 @@ def is_terminal_tool(name: str) -> bool:
 def is_executable_tool(name: str) -> bool:
     """模型这次调的工具是否为可执行工具（需服务端执行 + 结果回喂 + 循环继续）。"""
     return name in EXECUTABLE_TOOLS
+
+
+def _execute_tool(db: Session, name: str, tool_input: dict) -> dict:
+    """执行可执行工具，返回结构化结果 dict（loop 会序列化成 tool_result 回喂给模型）。
+
+    纯查询、无副作用、可单测。阶段三② 步骤2：search_products 复用产品查询，
+    按风险等级查「active」产品并只回喂精简字段（控制 token，只给模型挑选所需信息）。
+    """
+    if name == TOOL_SEARCH:
+        risk_level = tool_input.get("risk_level")
+        products = (
+            db.query(Product)
+            .filter(Product.status == "active", Product.risk_level == risk_level)
+            .order_by(Product.expected_return.desc())
+            .all()
+        )
+        return {
+            "risk_level": risk_level,
+            "products": [
+                {
+                    "product_code": p.product_code,
+                    "name": p.name,
+                    "type": p.type,
+                    "expected_return": (
+                        float(p.expected_return) if p.expected_return is not None else None
+                    ),
+                }
+                for p in products
+            ],
+        }
+    raise ValueError(f"未知可执行工具: {name}")
 
 
 # ---------- Session 查询 / 创建 ----------
