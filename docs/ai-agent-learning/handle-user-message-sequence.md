@@ -26,9 +26,26 @@ sequenceDiagram
     FE->>R: POST /{code}/message
     R->>H: async for ev in handle_user_message(...)
     %% TODO 第1轮：H 调 LLM，LLM 返回 ToolResult(conclude)
+    H->>LLM: _call_llm_with_retry(llmClient, systemPrompt, messages, TOOLS_SCHEMA)
+    LLM-->>H: ToolResult(conclude)
     %% TODO：is_executable_tool(conclude)=False → 走终态分支
+    Note over H: is_executable_tool=False → 终态分支
+    alt deltas 非空（逐字）
+        loop 每个 TextDelta
+            H-->>R: yield delta(delta.text)
+            R-->>FE: SSE delta
+        end
+    else 无 text_delta（兜底）
+        H-->>R: yield delta(assistant_content)
+        R-->>FE: SSE delta
+    end
     %% TODO：落 user+assistant 消息、建 Assessment、session=completed（H->>DB）
+    H->>DB: add_all(user_msg, assistant_msg)
+    Note over H: name==TOOL_CONCLUDE → 建 Assessment；<br/>由 dimensions 算 normalized_score(五维均值×20)
+    H->>DB: add Assessment + session=completed + commit
     %% TODO：H 逐个 yield 事件给 R（delta？completed(concluded)？）→ R 转 SSE 给 FE
+    H-->>R: yield completed(concluded, assessment)
+    R-->>FE: SSE completed
 ```
 
 ---
