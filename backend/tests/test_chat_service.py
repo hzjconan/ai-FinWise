@@ -323,6 +323,24 @@ def test_handle_user_message_missing_tool_result_yields_error(db):
     assert events[-1]["data"]["code"] == "invalid_response"
 
 
+# ---------- 阶段三② 步骤1：工具分类（可执行 vs 终态）----------
+
+def test_tool_classification_terminal_vs_executable():
+    # 终态工具：ask / conclude —— 调用即结束本回合
+    assert chat_service.is_terminal_tool(chat_service.TOOL_ASK)
+    assert chat_service.is_terminal_tool(chat_service.TOOL_CONCLUDE)
+    assert not chat_service.is_executable_tool(chat_service.TOOL_ASK)
+    assert not chat_service.is_executable_tool(chat_service.TOOL_CONCLUDE)
+
+    # 可执行工具：search_products —— 关键断言：它「不是终态」，是「可执行」
+    assert chat_service.is_executable_tool(chat_service.TOOL_SEARCH)
+    assert not chat_service.is_terminal_tool(chat_service.TOOL_SEARCH)
+
+    # 未知工具：两者都不是（防御分流时会被当作未知处理）
+    assert not chat_service.is_terminal_tool("unknown_tool")
+    assert not chat_service.is_executable_tool("unknown_tool")
+
+
 # ---------- 改造护栏：终态工具应恰好 1 次 LLM 调用（不循环）----------
 # 现有 handle_user_message 每条用户消息只调一次 LLM。阶段三②要把它改成带 MAX_STEPS 的
 # while 循环（引入可执行工具 search_products 时才多轮）。这两个测试显式钉死「终态工具

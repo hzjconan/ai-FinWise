@@ -31,6 +31,7 @@ from app.utils.code_generator import generate_code
 # Tool 名称常量
 TOOL_ASK = "ask_next_question"
 TOOL_CONCLUDE = "conclude_assessment"
+TOOL_SEARCH = "search_products"  # 阶段三②：可执行工具（服务端执行→结果回喂→循环继续）
 
 TOOLS_SCHEMA: list[dict] = [
     {
@@ -60,6 +61,24 @@ TOOLS_SCHEMA: list[dict] = [
         },
     },
 ]
+
+# 工具分类（靠工具名约定区分，不改数据结构）——阶段三② 步骤1：
+#   - 终态工具：模型调它 = 本回合结束（ask 继续问 / conclude 下结论），loop 应收尾。
+#   - 可执行工具：服务端执行、把结果回喂给模型，loop 继续（search_products）。
+# 注意：search_products 尚未加入 TOOLS_SCHEMA（步骤3循环就绪后再加），此处仅先建立分类概念，
+#       不改动 handle_user_message 现有单步行为（现有测试应保持全绿）。
+TERMINAL_TOOLS = frozenset({TOOL_ASK, TOOL_CONCLUDE})
+EXECUTABLE_TOOLS = frozenset({TOOL_SEARCH})
+
+
+def is_terminal_tool(name: str) -> bool:
+    """模型这次调的工具是否为终态工具（调用即结束本回合）。"""
+    return name in TERMINAL_TOOLS
+
+
+def is_executable_tool(name: str) -> bool:
+    """模型这次调的工具是否为可执行工具（需服务端执行 + 结果回喂 + 循环继续）。"""
+    return name in EXECUTABLE_TOOLS
 
 
 # ---------- Session 查询 / 创建 ----------
