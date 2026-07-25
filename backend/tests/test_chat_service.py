@@ -462,3 +462,36 @@ def test_count_user_rounds(db):
     db.commit()
     db.refresh(session)
     assert chat_service.count_user_rounds(session) == 2
+
+
+# ============================================================
+# 阶段三② 练习 TODO —— 在真实 chat_service 上练手
+#   规则：遵守仓库硬约束「改动必须有测试」；玩法同 scratch——自己改码 + 写测试，改完让我 review + 跑。
+#   建议从 #3 开始（修一个真实缺口，价值最高）。
+# ------------------------------------------------------------
+# 3. ★ 补「未知工具」防御（先做）
+#    现状缺口：handle_user_message 里，若模型调了「既非可执行、也非 ask/conclude」的未知工具，
+#      is_executable_tool 为假 → 落到终态分支 → 因 name != TOOL_CONCLUDE → 被【误当成 asking】处理。
+#    改哪：app/services/chat_service.py 的 handle_user_message 终态分支——先判 name 是否属于已知
+#      终态工具(TERMINAL_TOOLS)，否则 yield {"code":"invalid_response"/"unknown_tool"} 的 error
+#      并 return（别静默当 ask）。参照你 s3_01 的「显式三分流」。
+#    加测试：mock 返回一个未知工具名的 ToolResult（如 ToolResult(name="foo", input={})），
+#      断言 yield 了 error 事件、且没建 Assessment、没落 ChatMessage。
+#    练的：把 scratch 的「防御未知工具」焊到真实代码。
+#
+# 4. 测 MAX_STEPS 兜底（纯加测试，不改码）
+#    加测试：给 MockLLMClient 连续 push 6 个 _search_events()（永不 conclude），
+#      断言最终 yield 了 {"code": "max_steps"} 的 error、没建 Assessment、没落中间 ChatMessage。
+#    练的：验证 MAX_AGENT_STEPS 安全阀（C 文档专门点名的测试）。
+#
+# 5. 加第二个可执行工具 get_product_detail(product_code)
+#    改哪：TOOLS_SCHEMA 加工具定义、EXECUTABLE_TOOLS 加名字、_execute_tool 加分支
+#      （复用 Product 查询，按 product_code 返回某产品更多字段）。
+#    加测试：_execute_tool 按 code 返回正确详情；进阶可再加 search→detail→conclude 三步 loop 测试。
+#    练的：在真实 agent loop 上「扩工具」（对应 s3_01 的 subtract 练习）。
+#
+# 6. 加硬校验：conclude 落库前校验 risk_preference ∈ C1–C5，非法则 error 不落库
+#    改哪：handle_user_message 的 conclude 分支，落 Assessment 前加服务端校验。
+#    加测试：mock 返回 conclude 但 risk_preference="C9"（越界），断言 yield error、没建 Assessment。
+#    练的：把「软约束(schema enum) + 硬校验(服务端兜底)」焊到真实评估流程。
+# ============================================================
