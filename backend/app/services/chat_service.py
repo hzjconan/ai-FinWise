@@ -13,6 +13,7 @@
 - conclude 在单个事务内写 assessment + 更新 session.status + 关联 chat_session_id
 """
 
+import json
 from collections.abc import AsyncIterator
 from decimal import Decimal
 from typing import Any
@@ -61,7 +62,20 @@ TOOLS_SCHEMA: list[dict] = [
             "required": ["content", "risk_preference", "summary", "dimensions"],
         },
     },
+    {
+        "name": TOOL_SEARCH,
+        "description": "（可选）按风险等级查询当前在售产品，供评估参考。风险等级取值 C1–C5。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "risk_level": {"type": "string", "enum": ["C1", "C2", "C3", "C4", "C5"]},
+            },
+            "required": ["risk_level"],
+        },
+    },
 ]
+
+MAX_AGENT_STEPS = 5  # ★ agent loop 硬上限：防止可执行工具被无限调用（失控/烧钱）
 
 # 工具分类（靠工具名约定区分，不改数据结构）——阶段三② 步骤1：
 #   - 终态工具：模型调它 = 本回合结束（ask 继续问 / conclude 下结论），loop 应收尾。
@@ -265,97 +279,121 @@ async def handle_user_message(
     错误情况：
     - {"event": "error", "data": {"code": "...", "message": "..."}}
     """
-    history_msgs = build_api_messages(session)
-    new_messages = history_msgs + [{"role": "user", "content": user_content}]
+    # 工作消息（内存态）：历史 + 本轮 user。search_products 的中间往返只在这里累积，
+    # 不落库、不吐 delta（用户不该看到内部工具调用）。
+    messages = build_api_messages(session) + [{"role": "user", "content": user_content}]
 
-    try:
-        text, tool_result, llm_error, deltas = await _call_llm_with_retry(
-            llm,
-            system=load_system_prompt(),
-            messages=new_messages,
-            tools=TOOLS_SCHEMA,
+    # ★ agent loop：调 LLM → 分流（可执行→执行回喂继续 / 终态→收尾）→ 直到收尾或触上限
+    for _step in range(MAX_AGENT_STEPS):
+        try:
+            text, tool_result, llm_error, deltas = await _call_llm_with_retry(
+                llm,
+                system=load_system_prompt(),
+                messages=messages,
+                tools=TOOLS_SCHEMA,
+            )
+        except Exception as e:  # noqa: BLE001
+            yield {"event": "error", "data": {"code": "llm_error", "message": str(e)}}
+            return
+
+        if llm_error is not None:
+            yield {"event": "error", "data": {"code": llm_error.code, "message": llm_error.message}}
+            return
+
+        if tool_result is None:
+            yield {
+                "event": "error",
+                "data": {"code": "invalid_response", "message": "LLM 未返回 tool_use"},
+            }
+            return
+
+        # ---- 可执行工具：执行 → 结果回喂 messages（内存，不落库、不吐 delta）→ 继续循环 ----
+        if is_executable_tool(tool_result.name):
+            result = _execute_tool(db, tool_result.name, tool_result.input)
+            messages.append({
+                "role": "assistant",
+                "content": [{"type": "tool_use", "name": tool_result.name, "input": tool_result.input}],
+            })
+            messages.append({
+                "role": "user",
+                "content": [{"type": "tool_result", "content": json.dumps(result, ensure_ascii=False)}],
+            })
+            continue
+
+        # ---- 终态工具（ask / conclude）：吐 delta、落盘、收尾（行为与改造前一致）----
+        assistant_content = tool_result.input.get("content") or text
+
+        # 逐条吐 delta；若流里没有 text_delta（典型真实场景：模型直接输出 tool_use），
+        # 把 tool input 的 content 作为单个 delta 兜底，避免前端拿到空白气泡。
+        if deltas:
+            for delta in deltas:
+                yield {"event": "delta", "data": {"content": delta.text}}
+        elif assistant_content:
+            yield {"event": "delta", "data": {"content": assistant_content}}
+
+        # 持久化 user + assistant 消息（一轮只在收尾时落一次 user）
+        user_msg = ChatMessage(session_id=session.id, role="user", content=user_content)
+        assistant_msg = ChatMessage(
+            session_id=session.id,
+            role="assistant",
+            content=assistant_content,
+            tool_use={"name": tool_result.name, "input": tool_result.input},
         )
-    except Exception as e:  # noqa: BLE001
-        yield {"event": "error", "data": {"code": "llm_error", "message": str(e)}}
-        return
+        db.add_all([user_msg, assistant_msg])
 
-    if llm_error is not None:
-        yield {"event": "error", "data": {"code": llm_error.code, "message": llm_error.message}}
-        return
+        if tool_result.name == TOOL_CONCLUDE:
+            # 单事务：落 Assessment + 完成 session
+            payload = tool_result.input
+            assessment = Assessment(
+                code=generate_code(db, Assessment, "ASM"),
+                customer_id=session.customer_id,
+                source="ai_chat",
+                risk_preference=payload["risk_preference"],
+                ai_summary=payload.get("summary"),
+                ai_dimensions=payload.get("dimensions"),
+                chat_session_id=session.id,
+            )
+            # 若 dimensions 给了，顺便填 normalized_score（5 维均值 × 20 → 0–100）
+            dims: dict[str, Any] = payload.get("dimensions") or {}
+            if dims:
+                values = [v for v in dims.values() if isinstance(v, (int, float))]
+                if values:
+                    assessment.normalized_score = Decimal(
+                        str(round(sum(values) / len(values) * 20, 2))
+                    )
+            db.add(assessment)
+            session.status = "completed"
+            db.commit()
+            db.refresh(assessment)
 
-    if tool_result is None:
-        yield {
-            "event": "error",
-            "data": {"code": "invalid_response", "message": "LLM 未返回 tool_use"},
-        }
-        return
+            yield {
+                "event": "completed",
+                "data": {
+                    "phase": "concluded",
+                    "round": count_user_rounds(session),
+                    "assessment": {
+                        "assessment_code": assessment.code,
+                        "source": "ai_chat",
+                        "risk_preference": assessment.risk_preference,
+                        "risk_label": PREFERENCE_LABELS.get(assessment.risk_preference, "未知"),
+                        "ai_summary": assessment.ai_summary,
+                        "ai_dimensions": assessment.ai_dimensions,
+                    },
+                },
+            }
+            return
 
-    assistant_content = tool_result.input.get("content") or text
-
-    # 逐条吐 delta；若流里没有 text_delta（典型真实场景：模型直接输出 tool_use），
-    # 把 tool input 的 content 作为单个 delta 兜底，避免前端拿到空白气泡。
-    if deltas:
-        for delta in deltas:
-            yield {"event": "delta", "data": {"content": delta.text}}
-    elif assistant_content:
-        yield {"event": "delta", "data": {"content": assistant_content}}
-
-    # 持久化 user + assistant 消息
-    user_msg = ChatMessage(session_id=session.id, role="user", content=user_content)
-    assistant_msg = ChatMessage(
-        session_id=session.id,
-        role="assistant",
-        content=assistant_content,
-        tool_use={"name": tool_result.name, "input": tool_result.input},
-    )
-    db.add_all([user_msg, assistant_msg])
-
-    if tool_result.name == TOOL_CONCLUDE:
-        # 单事务：落 Assessment + 完成 session
-        payload = tool_result.input
-        assessment = Assessment(
-            code=generate_code(db, Assessment, "ASM"),
-            customer_id=session.customer_id,
-            source="ai_chat",
-            risk_preference=payload["risk_preference"],
-            ai_summary=payload.get("summary"),
-            ai_dimensions=payload.get("dimensions"),
-            chat_session_id=session.id,
-        )
-        # 若 dimensions 给了，顺便填 normalized_score（5 维均值 × 20 → 0–100）
-        dims: dict[str, Any] = payload.get("dimensions") or {}
-        if dims:
-            values = [v for v in dims.values() if isinstance(v, (int, float))]
-            if values:
-                assessment.normalized_score = Decimal(
-                    str(round(sum(values) / len(values) * 20, 2))
-                )
-        db.add(assessment)
-        session.status = "completed"
+        # 继续问（TOOL_ASK）
         db.commit()
-        db.refresh(assessment)
-
+        db.refresh(session)
         yield {
             "event": "completed",
-            "data": {
-                "phase": "concluded",
-                "round": count_user_rounds(session),
-                "assessment": {
-                    "assessment_code": assessment.code,
-                    "source": "ai_chat",
-                    "risk_preference": assessment.risk_preference,
-                    "risk_label": PREFERENCE_LABELS.get(assessment.risk_preference, "未知"),
-                    "ai_summary": assessment.ai_summary,
-                    "ai_dimensions": assessment.ai_dimensions,
-                },
-            },
+            "data": {"phase": "asking", "round": count_user_rounds(session)},
         }
         return
 
-    # 继续问
-    db.commit()
-    db.refresh(session)
+    # 循环到 MAX_AGENT_STEPS 仍未收尾（可执行工具连续调用未终止）→ 兜底错误，防失控
     yield {
-        "event": "completed",
-        "data": {"phase": "asking", "round": count_user_rounds(session)},
+        "event": "error",
+        "data": {"code": "max_steps", "message": "agent 未能在限定步数内完成"},
     }

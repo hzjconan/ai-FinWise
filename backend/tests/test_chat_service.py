@@ -40,6 +40,10 @@ def _ask_events(content: str) -> list:
     ]
 
 
+def _search_events(risk_level: str = "C4") -> list:
+    return [ToolResult(name=chat_service.TOOL_SEARCH, input={"risk_level": risk_level})]
+
+
 def _conclude_events(
     content: str = "评估完成",
     pref: str = "C3",
@@ -244,6 +248,46 @@ def test_handle_user_message_conclude_creates_assessment(db):
     assert a.normalized_score is not None
     # 均值 4 × 20 = 80
     assert float(a.normalized_score) == 80.0
+
+
+def test_handle_user_message_conclude_after_search(db):
+    """阶段三② 步骤3 验收：模型先调可执行工具 search_products（执行+回喂，不落库不吐 delta），
+    再 conclude。断言：① 中间不落库/不吐 search delta ② 最终建 Assessment
+    ③ 调 2 次 LLM 且第 2 次 messages 含 tool_result（search 结果被回喂）。"""
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    _make_product(db, "P-C4", "成长精选混合", "C4", "0.085")
+    db.commit()
+
+    llm = MockLLMClient([
+        _search_events("C4"),         # 第 1 轮：可执行工具 → 执行、回喂、继续
+        _conclude_events(pref="C4"),  # 第 2 轮：终态工具 → 收尾
+    ])
+
+    events = _run(_collect(chat_service.handle_user_message(db, session, "我追求高收益", llm)))
+
+    # ① 中间 search 不落库：最终只落 user + assistant(conclude) 两条（无 search 那条）
+    msgs = db.query(ChatMessage).filter_by(session_id=session.id).order_by(ChatMessage.id).all()
+    assert [m.role for m in msgs] == ["user", "assistant"]
+    assert msgs[1].tool_use["name"] == chat_service.TOOL_CONCLUDE
+    #    中间 search 不吐 delta：所有 delta 都只来自 conclude 的 content
+    delta_events = [e for e in events if e["event"] == "delta"]
+    assert all(e["data"]["content"] == "评估完成" for e in delta_events)
+
+    # ② 最终建了 Assessment
+    completed = [e for e in events if e["event"] == "completed"]
+    assert len(completed) == 1 and completed[0]["data"]["phase"] == "concluded"
+    assessments = db.query(Assessment).filter_by(customer_id=customer.id).all()
+    assert len(assessments) == 1 and assessments[0].risk_preference == "C4"
+
+    # ③ 调了 2 次 LLM，且第 2 次 messages 含 tool_result（search 结果确实回喂给了模型）
+    assert len(llm.calls) == 2
+    second_messages = llm.calls[1]["messages"]
+    assert any(
+        isinstance(m.get("content"), list)
+        and any(b.get("type") == "tool_result" for b in m["content"])
+        for m in second_messages
+    )
 
 
 def test_handle_user_message_no_deltas_uses_tool_content_as_delta(db):
