@@ -495,3 +495,21 @@ def test_count_user_rounds(db):
 #    加测试：mock 返回 conclude 但 risk_preference="C9"（越界），断言 yield error、没建 Assessment。
 #    练的：把「软约束(schema enum) + 硬校验(服务端兜底)」焊到真实评估流程。
 # ============================================================
+
+# 阶段三② 练习3 补「未知工具」防御
+def _unknown_tool_use(content: str) -> list:
+    return [
+        TextDelta(text=content),
+        ToolResult(name="unknown_tool", input={"content": content}),
+    ]
+def test_unknown_tool(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([_unknown_tool_use("未知工具")])
+
+    results = _run(_collect(chat_service.handle_user_message(db, session, "明天天气怎么样", llm)))
+    assert len(llm.calls) == 1
+    assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
+    assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 0
+    assert results[0]["event"] == "error"
+    assert results[0]["data"] == {"code": "unknown_tool", "message": "未知工具"}

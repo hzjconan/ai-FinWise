@@ -320,6 +320,11 @@ async def handle_user_message(
             })
             continue
 
+        # 阶段三② 练习3 补「未知工具」防御
+        if not is_terminal_tool(tool_result.name):
+            yield {"event": "error", "data": {"code": "unknown_tool", "message": "未知工具"}}
+            return
+
         # ---- 终态工具（ask / conclude）：吐 delta、落盘、收尾（行为与改造前一致）----
         assistant_content = tool_result.input.get("content") or text
 
