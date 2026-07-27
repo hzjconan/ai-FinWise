@@ -1,4 +1,5 @@
 """风险评估 prompt / 维度加载测试。"""
+from app.services.llm import prompts
 from app.services.llm.prompts import load_dimensions, load_system_prompt
 
 
@@ -34,3 +35,29 @@ def test_load_system_prompt_contains_all_dimensions_and_tool_rules():
         assert d["key"] in prompt
     # 占位符必须被替换
     assert "{DIMENSIONS}" not in prompt
+
+
+def test_env_override_uses_custom_file_as_is(tmp_path, monkeypatch):
+    """FINWISE_SYSTEM_PROMPT_FILE 指向自定义文件时读它；无 {DIMENSIONS} 也不报错、原样返回。"""
+    custom = tmp_path / "custom.md"
+    custom.write_text("你是自定义助手。可用工具 search_products。", encoding="utf-8")
+    monkeypatch.setenv("FINWISE_SYSTEM_PROMPT_FILE", str(custom))
+    prompts.load_system_prompt.cache_clear()
+    try:
+        assert load_system_prompt() == "你是自定义助手。可用工具 search_products。"
+    finally:
+        prompts.load_system_prompt.cache_clear()  # 清缓存，避免污染其他用例
+
+
+def test_env_override_still_replaces_dimensions_placeholder(tmp_path, monkeypatch):
+    """自定义文件若含 {DIMENSIONS}，仍会被渲染替换。"""
+    custom = tmp_path / "c.md"
+    custom.write_text("头\n{DIMENSIONS}\n尾", encoding="utf-8")
+    monkeypatch.setenv("FINWISE_SYSTEM_PROMPT_FILE", str(custom))
+    prompts.load_system_prompt.cache_clear()
+    try:
+        out = load_system_prompt()
+        assert "{DIMENSIONS}" not in out
+        assert "投资经验" in out  # 维度被渲染进来
+    finally:
+        prompts.load_system_prompt.cache_clear()
