@@ -108,8 +108,20 @@ sequenceDiagram
     R->>H: async for ev in handle_user_message(...)
     %% TODO：loop 循环，每轮 LLM 都返回 search_products → 执行回喂 → continue
     %%   （可以用 loop N 次 的 mermaid loop 语法，或画两轮 + 省略号示意）
+    loop 最多MAX_AGENT_STEPS(5)轮
+      H->>LLM: _call_llm_with_retry(llmClient, systemPrompt, messages, TOOLS_SCHEMA)
+      LLM-->>H: ToolResult(search_products)
+      H->>DB: _execute_tool(search_products)
+      DB-->>H: products
+      Note over H: tool_use+tool_result 回喂 messages，不落库/不吐delta → continue
+    end
     %% TODO：跑满 MAX_AGENT_STEPS 都没遇到终态工具 → 循环【外】yield error(max_steps)
+    H-->>R: yield error 未能在限定步数内完成 
     %% TODO：R 把 error 转 SSE 给 FE（想想：这里为什么是 yield error 而不是 return）
+    %% 这里用yield error是因为:
+    %% 1. 这是handle_user_message函数的最后一个yield，执行过后handle_user_message的生成器就走完了，所以后面不需要再写return。
+    %% 2.用return的话什么都不返回，前端页面不会更新
+    R-->>FE: SSE error
 ```
 
 ---
