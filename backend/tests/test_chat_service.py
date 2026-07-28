@@ -513,3 +513,16 @@ def test_unknown_tool(db):
     assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 0
     assert results[0]["event"] == "error"
     assert results[0]["data"] == {"code": "unknown_tool", "message": "未知工具"}
+
+# 阶段三② 练习4 测 MAX_STEPS 兜底
+def test_max_step_limit(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([_search_events("C4") for _ in range(chat_service.MAX_AGENT_STEPS + 1)])
+
+    results = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    assert len(llm.calls) == chat_service.MAX_AGENT_STEPS
+    assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
+    assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 0
+    assert results[-1]["event"] == "error"
+    assert results[-1]["data"]["code"] == "max_steps"
