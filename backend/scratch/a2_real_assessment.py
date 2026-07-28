@@ -123,6 +123,7 @@ async def main() -> None:
     section("统计")
     print("模型总共调用的工具序列:", llm.tool_calls)
     print("是否主动调用过 search_products:", "是" if "search_products" in llm.tool_calls else "否")
+    print("是否主动调用过 get_product_detail:", "是" if "get_product_detail" in llm.tool_calls else "否")
 
 
 asyncio.run(main())

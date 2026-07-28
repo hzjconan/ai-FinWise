@@ -6,6 +6,8 @@ import asyncio
 
 import pytest
 
+import json
+
 from app.models.assessment import Assessment
 from app.models.chat import ChatMessage, ChatSession
 from app.models.customer import Customer
@@ -526,3 +528,62 @@ def test_max_step_limit(db):
     assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 0
     assert results[-1]["event"] == "error"
     assert results[-1]["data"]["code"] == "max_steps"
+
+# 阶段三② 练习5 加第二个可执行工具
+def _get_product_detail(product_codes: list[str]):
+    return [ToolResult(name=chat_service.TOOL_GET_DETAIL, input={"product_codes": product_codes})]
+
+def test_get_valid_products_detail(db):
+    _make_product(db, "P-C4-A", "成长精选混合", "C4", "0.085")
+    _make_product(db, "P-C4-B", "科技行业ETF", "C4", "0.112", ptype="ETF")
+    _make_product(db, "P-C1", "稳盈货币A", "C1", "0.021")
+    db.commit()
+
+    results = chat_service._execute_tool(db, chat_service.TOOL_GET_DETAIL, {"product_codes": ["P-C4-B"]})
+    assert len(results["products"]) == 1
+    p = results["products"][0]
+    assert p["product_code"] == "P-C4-B" and p["name"] == "科技行业ETF"
+    assert p["expected_return"] == 0.112
+
+def test_get_invalid_products_detail(db):
+    _make_product(db, "P-C4-A", "成长精选混合", "C4", "0.085")
+    db.commit()
+
+    results = chat_service._execute_tool(db, chat_service.TOOL_GET_DETAIL, {"product_codes": ["P-C4-B"]})
+    assert len(results["products"]) == 0
+
+def test_loop_search_then_detail_then_conclude(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    _make_product(db, "P-C4-B", "科技行业ETF", "C4", "0.112", ptype="ETF")
+    db.commit()
+
+    llm = MockLLMClient([_search_events("C4"), _get_product_detail(["P-C4-B"]), _conclude_events(pref="C4")])
+
+    events = _run(_collect(chat_service.handle_user_message(db, session, "帮我看看产品", llm)))
+
+    # 最终 completed 且 phase == "concluded"，并建了 1 条 Assessment(risk_preference=="C4")
+    assert events[-1]["event"] == "completed"
+    assert events[-1]["data"]["phase"] == "concluded"
+    assert db.query(Assessment).filter_by(customer_id=customer.id, risk_preference="C4").count() == 1
+
+    # 调了 3 次 LLM
+    assert len(llm.calls) == 3
+
+    # (关键): 最后一次调用 llm.calls[-1]["messages"] 里，含一个
+    #  tool_use 块 name == chat_service.TOOL_GET_DETAIL —— 证明 get_detail 确实进了 loop 并被回喂
+    #tu_msg = llm.calls[-1]["messages"].filter(lambda x: x["type"] == "tool_use" and x["name"] == chat_service.TOOL_GET_DETAIL)
+    #assert tu_msg is not None
+    last_messages = llm.calls[-1]["messages"]
+    assert any(
+        isinstance(m["content"], list) and
+        any(
+            b["type"] == "tool_use"
+            and b["name"] == chat_service.TOOL_GET_DETAIL
+            for b in m["content"]
+        )
+        for m in last_messages
+    )
+
+    # 中间两步不落库 —— 最终 ChatMessage 只有 ["user", "assistant"] 两条
+    assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 2

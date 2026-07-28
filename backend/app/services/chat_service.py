@@ -34,6 +34,7 @@ from app.utils.code_generator import generate_code
 TOOL_ASK = "ask_next_question"
 TOOL_CONCLUDE = "conclude_assessment"
 TOOL_SEARCH = "search_products"  # 阶段三②：可执行工具（服务端执行→结果回喂→循环继续）
+TOOL_GET_DETAIL = "get_product_detail" # 阶段三② 练习5 加第二个可执行工具
 
 TOOLS_SCHEMA: list[dict] = [
     {
@@ -73,6 +74,15 @@ TOOLS_SCHEMA: list[dict] = [
             "required": ["risk_level"],
         },
     },
+    {
+        "name": TOOL_GET_DETAIL,
+        "description": "（可选）根据产品代码查询多个产品的详细信息。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"product_codes": {"type": "array", "items": {"type": "string"}}},
+            "required": ["product_codes"],
+        },
+    },
 ]
 
 MAX_AGENT_STEPS = 5  # ★ agent loop 硬上限：防止可执行工具被无限调用（失控/烧钱）
@@ -83,7 +93,7 @@ MAX_AGENT_STEPS = 5  # ★ agent loop 硬上限：防止可执行工具被无限
 # 注意：search_products 尚未加入 TOOLS_SCHEMA（步骤3循环就绪后再加），此处仅先建立分类概念，
 #       不改动 handle_user_message 现有单步行为（现有测试应保持全绿）。
 TERMINAL_TOOLS = frozenset({TOOL_ASK, TOOL_CONCLUDE})
-EXECUTABLE_TOOLS = frozenset({TOOL_SEARCH})
+EXECUTABLE_TOOLS = frozenset({TOOL_SEARCH, TOOL_GET_DETAIL})
 
 
 def is_terminal_tool(name: str) -> bool:
@@ -124,6 +134,17 @@ def _execute_tool(db: Session, name: str, tool_input: dict) -> dict:
                 for p in products
             ],
         }
+    if name == TOOL_GET_DETAIL:
+        products: list[Product] = db.query(Product).filter(Product.product_code.in_(tool_input.get("product_codes"))).all()
+        return {"products": [
+            {
+                "product_code": p.product_code,
+                "name": p.name,
+                "expected_return": (
+                    float(p.expected_return) if p.expected_return is not None else None
+                ),
+            } for p in products
+        ]}
     raise ValueError(f"未知可执行工具: {name}")
 
 

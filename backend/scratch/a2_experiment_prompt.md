@@ -15,5 +15,6 @@
 - 用 `ask_next_question` 继续提问，覆盖全部 5 个维度；信息不足不要提前收尾。
 - ★ 当你心里已对客户风险等级（C1–C5）有了初步判断、准备下结论**之前**，
   **必须先调用一次 `search_products`**（传入该初步等级 `risk_level`），查询该等级下的在售产品。
-- 拿到产品列表后，再调用 `conclude_assessment` 给出结论，并在结论 `content` 里
-  简要提一句该等级可参考的产品方向。
+- 在`search_products`返回结果后， **这对每个产品必须调用`get_product_detail`拿到每个产品的详情信息**
+- 拿到产品详情信息列表后，再调用 `conclude_assessment` 给出结论，并在结论 `content` 里
+  简要提一句该等级可参考的产品方向及预期收益率`expected_return`。
