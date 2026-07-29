@@ -141,6 +141,8 @@
 - [ ] 改 prompt 后能立刻看到分数升降。
 - [ ] 能在 trace 里定位到 agent 哪一步出了问题。
 
+**本阶段挂的待办 · B#8（字段顺序 A/B）**：把 `conclude_assessment` 的字段顺序改成「依据在前、结论在后」（`dimensions → summary → risk_preference → content`，见 `05-field-order-and-schema-as-prompt.md`）。这是纯**质量**改动，单测测不出——正好用本阶段的 eval **A/B 两种顺序**，量出维度打分质量/定级准确率有没有变。用它当 eval 的**第一个真实练习对象**（有明确假设、有可测目标），而不是凭理论盲改 schema。
+
 ---
 
 ## 阶段六：框架与多 Agent（约 2 周）
@@ -193,9 +195,9 @@
 |---|---|---|---|
 | 一 LLM API 基础 | ✅ 已完成 | 2026-07-17 | s1_01/02/03 三个脚本 + 全部 TODO 已做并验证（结构化输出、流式事件、上下文即内存） |
 | 二 Prompt Engineering | ✅ 已完成 | 2026-07-19 | s2_01/02 + 全部 TODO 已做并验证（prompt即代码/锚点、结构化输出+字段顺序、抗注入+防御分层） |
-| 三 Tool Use ★ | 🟡 进行中 | | scratch 手写 loop 已做（A `s3_01` 计算器 / B `s3_02` 产品推荐+溯源）；②真实 chat_service 改造（C 文档）进行中 |
-| 四 RAG / 上下文工程 | ⬜ 未开始 | | |
-| 五 评估与可观测性 ★ | ⬜ 未开始 | | |
+| 三 Tool Use ★ | ✅ 已完成 | 2026-07-29 | scratch 手写 loop（A `s3_01` / B `s3_02`）+ B#3–B#7 真实 chat_service agent loop（可执行/终态工具、MAX_STEPS、未知工具防御、conclude 硬校验、search C→R、定级去模型化、维度三层校验）+ 对接真实 API 的 tool_use/tool_result id 配对；复盘见 docs 03/04/05 |
+| 四 RAG / 上下文工程 | 🟡 进行中 | | |
+| 五 评估与可观测性 ★ | ⬜ 未开始 | | 挂了 B#8（conclude 字段顺序 A/B），见本阶段"待办" |
 | 六 框架与多 Agent | ⬜ 未开始 | | |
 | 七 生产化 | ⬜ 未开始 | | |
 
