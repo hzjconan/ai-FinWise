@@ -152,7 +152,7 @@ def test_message_concludes_creates_assessment(client, customer_code, mock_llm, d
     events = _parse_sse(resp.text)
     completed = [e for e in events if e["event"] == "completed"]
     assert completed[-1]["data"]["phase"] == "concluded"
-    assert completed[-1]["data"]["assessment"]["risk_preference"] == "C2"
+    assert completed[-1]["data"]["assessment"]["risk_preference"] == "C4"
     assert completed[-1]["data"]["assessment"]["source"] == "ai_chat"
 
     # 真的落了 Assessment

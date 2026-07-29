@@ -17,6 +17,7 @@ import json
 from collections.abc import AsyncIterator
 from decimal import Decimal
 from typing import Any
+from unicodedata import normalize
 
 from sqlalchemy.orm import Session
 
@@ -26,11 +27,12 @@ from app.models.customer import Customer
 from app.models.product import Product
 from app.services.llm.base import LLMClient
 from app.services.llm.events import LLMError, TextDelta, ToolResult
-from app.services.llm.prompts import load_system_prompt
-from app.services.risk_calculator import MATCH_RULES, PREFERENCE_LABELS
+from app.services.llm.prompts import load_system_prompt, load_dimensions
+from app.services.risk_calculator import MATCH_RULES, PREFERENCE_LABELS, calculate_risk_preference
 from app.utils.code_generator import generate_code
 
 VALID_RISK_PREFERENCE = frozenset(PREFERENCE_LABELS)
+VALID_DIMENSION_KEYS = frozenset(d["key"] for d in load_dimensions())
 
 # Tool 名称常量
 TOOL_ASK = "ask_next_question"
@@ -353,9 +355,20 @@ async def handle_user_message(
             return
 
         # 阶段三② 练习6 加硬校验：conclude 落库前校验 risk_preference ∈ C1–C5，非法则 error 不落库
-        if tool_result.name == TOOL_CONCLUDE and tool_result.input.get("risk_preference") not in VALID_RISK_PREFERENCE:
-            yield {"event": "error", "data": {"code": "invalid_risk_preference", "message": "风险偏好无效"}}
-            return
+        if tool_result.name == TOOL_CONCLUDE:
+            payload = tool_result.input
+            if payload.get("risk_preference") not in VALID_RISK_PREFERENCE:
+                yield {"event": "error", "data": {"code": "invalid_risk_preference", "message": "风险偏好无效"}}
+                return
+            # 阶段三② 练习7 dimensions 缺失 / 空 / 不是 5 维 → 畸形
+            dimensions = payload.get("dimensions")
+            if (not isinstance(dimensions, dict) 
+                or set(dimensions.keys()) != VALID_DIMENSION_KEYS
+                or not all(isinstance(v, (int, float)) for v in dimensions.values())):
+                yield {"event": "error", "data": {"code": "invalid_dimensions", "message": "维度分数无效"}}
+                return
+
+            values = list(dimensions.values())
 
         # ---- 终态工具（ask / conclude）：吐 delta、落盘、收尾（行为与改造前一致）----
         assistant_content = tool_result.input.get("content") or text
@@ -380,24 +393,24 @@ async def handle_user_message(
 
         if tool_result.name == TOOL_CONCLUDE:
             # 单事务：落 Assessment + 完成 session
-            payload = tool_result.input
             assessment = Assessment(
                 code=generate_code(db, Assessment, "ASM"),
                 customer_id=session.customer_id,
                 source="ai_chat",
-                risk_preference=payload["risk_preference"],
                 ai_summary=payload.get("summary"),
-                ai_dimensions=payload.get("dimensions"),
+                ai_dimensions=dimensions,
                 chat_session_id=session.id,
             )
             # 若 dimensions 给了，顺便填 normalized_score（5 维均值 × 20 → 0–100）
-            dims: dict[str, Any] = payload.get("dimensions") or {}
-            if dims:
-                values = [v for v in dims.values() if isinstance(v, (int, float))]
-                if values:
-                    assessment.normalized_score = Decimal(
-                        str(round(sum(values) / len(values) * 20, 2))
-                    )
+            # 阶段三② 练习7 把定级从模型手里拿走：conclude 用「维度分 → 确定性阈值」定级
+            normalized, preference, *_ = calculate_risk_preference(
+                sum(values), 
+                # 各维度满分5
+                len(values)*5
+            )
+            assessment.risk_preference = preference
+            assessment.normalized_score = normalized
+
             db.add(assessment)
             session.status = "completed"
             db.commit()

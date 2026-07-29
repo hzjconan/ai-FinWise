@@ -50,7 +50,7 @@ def _conclude_events(
     content: str = "评估完成",
     pref: str = "C3",
     summary: str = "客户属于稳健型",
-    dimensions: dict | None = None,
+    dimensions: dict | None = {"experience": 5, "loss_tolerance": 3, "income_stability": 3, "investment_horizon": 4, "volatility_tolerance": 3},
 ) -> list:
     return [
         ToolResult(
@@ -59,7 +59,7 @@ def _conclude_events(
                 "content": content,
                 "risk_preference": pref,
                 "summary": summary,
-                "dimensions": dimensions or {"risk_tolerance": 3, "experience": 3},
+                "dimensions": dimensions,
             },
         ),
     ]
@@ -224,7 +224,7 @@ def test_handle_user_message_conclude_creates_assessment(db):
     llm = MockLLMClient([_conclude_events(
         pref="C4",
         summary="进取型",
-        dimensions={"risk_tolerance": 4, "experience": 4, "horizon": 5, "liquidity": 3, "goal": 4},
+                dimensions={"experience": 4, "loss_tolerance": 4, "income_stability": 4, "investment_horizon": 4, "volatility_tolerance": 4}, # sum=20 → 80 → C5
     )])
 
     events = _run(_collect(chat_service.handle_user_message(db, session, "我追求高收益", llm)))
@@ -233,7 +233,7 @@ def test_handle_user_message_conclude_creates_assessment(db):
     assert len(completed) == 1
     data = completed[0]["data"]
     assert data["phase"] == "concluded"
-    assert data["assessment"]["risk_preference"] == "C4"
+    assert data["assessment"]["risk_preference"] == "C5"
     assert data["assessment"]["source"] == "ai_chat"
     assert data["assessment"]["risk_label"]
 
@@ -496,6 +496,35 @@ def test_count_user_rounds(db):
 #    改哪：handle_user_message 的 conclude 分支，落 Assessment 前加服务端校验。
 #    加测试：mock 返回 conclude 但 risk_preference="C9"（越界），断言 yield error、没建 Assessment。
 #    练的：把「软约束(schema enum) + 硬校验(服务端兜底)」焊到真实评估流程。
+#
+# 7. ★ 把定级从模型手里拿走：conclude 用「维度分 → 确定性阈值」定级（B#6 的下一步）
+#    ---- 目的（为什么做这个练习）----
+#    风险等级(C1–C5)是有业务后果的关键值——它决定给客户推什么风险的产品。而「维度分 → 等级」
+#    是一步纯机械的阈值映射，不该由模型自由裁量。真机实证：同一套维度分（均值 3.6 → normalized 72），
+#    模型两次自报一次 C4、一次 C3，且 C3 那次跟它【自己给的维度分】(72 按阈值应为 C4)自相矛盾——
+#    软判断会在边界抖。目标：让模型只出它擅长的「维度分」，「维度分→等级」交给确定性代码。
+#
+#    ---- 现状缺口：同一个系统里有两套定级方式 ----
+#      · 问卷链路（确定性）：calculate_risk_preference(risk_calculator.py:69)——把分数按
+#        PREFERENCE_THRESHOLDS 映射到 C 级，纯阈值、零裁量、可复现。
+#      · AI 对话链路（模型裁量）：conclude 分支直接 risk_preference=payload["risk_preference"]，
+#        信任模型【自报】的等级。B#6 只校验它 ∈ C1–C5，不校验它对不对。
+#    问卷是确定性的、AI 是模型裁量的——这就是要弥合的缺口。而 conclude 分支其实【已经在算】
+#    normalized_score(维度均值×20)了，只差最后一步「用它定级」没接上。
+#
+#    ---- 改哪 ----
+#    handle_user_message 的 conclude 分支：用模型给的 dimensions 算 total_score/max_possible，
+#    走 calculate_risk_preference（total=sum(维度值)、max=维度数×5）拿到 preference_code，
+#    用【算出来的】等级落库，不再信 payload["risk_preference"]（它降级为参考，可忽略或做一致性
+#    对比、不一致时记日志）。校验重心从「risk_preference 合法」移到「dimensions 存在且为 5 维」——
+#    畸形维度分沿用 B#6 思路：拦下（error 不落库），别拿残缺数据算。
+#
+#    ---- 加测试 ----
+#    · 钉死抖动：mock conclude 给维度均值 3.6（如 experience=5,loss=3,income=3,horizon=4,vol=3）、
+#      但 risk_preference 自报 "C3"，断言落库 Assessment.risk_preference == "C4"
+#      （以维度分算出的为准，不随模型自报走）。这把那次 C4/C3 抖动用测试永久钉死。
+#    · 边界：构造正好落某档的维度分，断言映射到预期等级。
+#    练的：把「关键值来自权威计算、不信模型」从原则变成代码。
 # ============================================================
 
 # 阶段三② 练习3 补「未知工具」防御
@@ -616,9 +645,6 @@ def test_missing_risk_preference(db):
     assert results[0]["data"]["code"] == "invalid_risk_preference"
 
 def test_valid_matched_risk_level(db):
-    customer = _make_customer(db)
-    session = chat_service.create_session(db, customer.id)
-
     _make_product(db, "P-R4-B", "科技行业ETF", "R4", "0.112", ptype="ETF")
     db.commit()
 
@@ -630,9 +656,6 @@ def test_valid_matched_risk_level(db):
     assert p["product_code"] == "P-R4-B" and p["name"] == "科技行业ETF"
 
 def test_invalid_matched_risk_level(db):
-    customer = _make_customer(db)
-    session = chat_service.create_session(db, customer.id)
-
     _make_product(db, "P-R4-B", "科技行业ETF", "R4", "0.112", ptype="ETF")
     db.commit()
 
@@ -640,3 +663,55 @@ def test_invalid_matched_risk_level(db):
     
     assert result["risk_level"] == "C3"
     assert len(result["products"]) == 0
+
+# 阶段三② 练习7 把定级从模型手里拿走：conclude 用「维度分 → 确定性阈值」定级
+def test_caculate_risk_preference_from_valid_dimensions(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    dimensions = {"experience": 5, "loss_tolerance": 3, "income_stability": 3, "investment_horizon": 4, "volatility_tolerance": 3}
+    llm = MockLLMClient([_conclude_events(pref="C2", dimensions=dimensions)])
+    result = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    # 自己计算 risk_preference，不采纳模型给出的值——验证「落库的值」
+    asm: Assessment = db.query(Assessment).filter_by(customer_id=customer.id).one()
+    assert asm.risk_preference == "C4"
+
+def test_caculate_risk_preference_from_invalid_dimensions(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([_conclude_events(pref="C2", dimensions={"experience": 5, "loss_tolerance": 3, "income_stability": 3,
+                  "investment_horizon": 4, "unknown": 1})])
+    result = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    assert result[-1]["event"] == "error"
+    assert result[-1]["data"]["code"] == "invalid_dimensions"
+    assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
+
+def test_caculate_risk_preference_from_invalid_dimensions_count(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([_conclude_events(pref="C2", dimensions={"experience": 5, "loss_tolerance": 3, "income_stability": 3,
+                  "investment_horizon": 4, "volatility_tolerance": 3, "unknown": 1})])
+    result = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    assert result[-1]["event"] == "error"
+    assert result[-1]["data"]["code"] == "invalid_dimensions"
+    assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
+
+def test_caculate_risk_preference_from_empty_dimensions(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([_conclude_events(pref="C2", dimensions=None)])
+    result = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    assert result[-1]["event"] == "error"
+    assert result[-1]["data"]["code"] == "invalid_dimensions"
+    assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
+
+def test_caculate_risk_preference_from_non_numeric_dimensions(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+
+    # 5 个键，但有一个是字符串（个数够、类型不对）—— 旧校验会漏过、静默用 4 维算错
+    dimensions = {"experience": 5, "loss_tolerance": 3, "income_stability": 3, "investment_horizon": 4, "volatility_tolerance": "高"}
+    llm = MockLLMClient([_conclude_events(pref="C2", dimensions=dimensions)])
+    result = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    assert result[-1]["event"] == "error"
+    assert result[-1]["data"]["code"] == "invalid_dimensions"
+    assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
