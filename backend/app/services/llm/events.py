@@ -12,6 +12,7 @@ class ToolResult:
     """模型完成的 tool 调用（流结束时产出一次）。"""
     name: str            # ask_next_question | conclude_assessment
     input: dict          # 完整参数对象（含 content、risk_preference、summary、dimensions 等）
+    id: str = ""         # tool_use 块的 id（如 "toolu_01.."）；多步回喂时 tool_result 用它配对
 
 
 @dataclass

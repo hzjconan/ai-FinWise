@@ -155,9 +155,9 @@ def test_build_api_messages_user_and_assistant(db):
 
     msgs = chat_service.build_api_messages(session)
     assert len(msgs) == 2
-    assert msgs[0]["role"] == "assistant"
-    assert isinstance(msgs[0]["content"], list)
-    assert msgs[0]["content"][0]["type"] == "tool_use"
+    # 终态工具（ask/conclude）回放成纯 assistant 文本，不是 tool_use 块——
+    # 避免历史里出现「后面没有配对 tool_result 的悬空 tool_use」（真实 API 会拒）
+    assert msgs[0] == {"role": "assistant", "content": "你好？"}
     assert msgs[1] == {"role": "user", "content": "我想投资"}
 
 
@@ -290,6 +290,34 @@ def test_handle_user_message_conclude_after_search(db):
         and any(b.get("type") == "tool_result" for b in m["content"])
         for m in second_messages
     )
+
+
+def test_executable_tool_use_and_result_paired_by_id(db):
+    """可执行工具回喂：tool_use.id 与 tool_result.tool_use_id 必须配对（真实 Anthropic API 强制）。"""
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    _make_product(db, "P-R4", "成长精选混合", "R4", "0.085")
+    db.commit()
+
+    # 带 id 的可执行工具调用 → 执行、回喂 → 再 conclude 收尾
+    search_with_id = [ToolResult(name=chat_service.TOOL_SEARCH, input={"risk_level": "C4"}, id="toolu_test_123")]
+    llm = MockLLMClient([search_with_id, _conclude_events(pref="C4")])
+
+    events = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    assert events[-1]["event"] == "completed"
+
+    # 第 2 次调用回喂的 messages 里，抓出 tool_use 的 id 与 tool_result 的 tool_use_id
+    tool_use_id = tool_result_ref = None
+    for m in llm.calls[1]["messages"]:
+        if isinstance(m.get("content"), list):
+            for b in m["content"]:
+                if b.get("type") == "tool_use":
+                    tool_use_id = b.get("id")
+                if b.get("type") == "tool_result":
+                    tool_result_ref = b.get("tool_use_id")
+    assert tool_use_id == "toolu_test_123"          # 源 id 被带上 tool_use
+    assert tool_result_ref == "toolu_test_123"      # tool_result 用同一个 id 指回去
+    assert tool_use_id == tool_result_ref           # 配对成立
 
 
 def test_handle_user_message_no_deltas_uses_tool_content_as_delta(db):

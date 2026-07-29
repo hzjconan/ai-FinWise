@@ -59,5 +59,5 @@ class AnthropicLLMClient:
             for block in final.content:
                 if getattr(block, "type", None) == "tool_use":
                     input_dict: dict[str, Any] = dict(block.input) if block.input else {}
-                    yield ToolResult(name=block.name, input=input_dict)
+                    yield ToolResult(name=block.name, input=input_dict, id=getattr(block, "id", ""))
                     return

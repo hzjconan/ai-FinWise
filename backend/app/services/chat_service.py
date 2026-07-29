@@ -195,20 +195,19 @@ def abandon_session(db: Session, session: ChatSession) -> None:
 # ---------- 消息 API 格式转换 ----------
 
 def build_api_messages(session: ChatSession) -> list[dict]:
-    """把 chat_messages 转成 Anthropic messages 格式。"""
+    """把 chat_messages 转成 Anthropic messages 格式。
+
+    终态工具（ask/conclude）本质是结构化输出，其可见内容就是 content 文本。回放历史时
+    统一转成纯 assistant 文本，而非 tool_use 块——因为历史里的终态 tool_use 后面并没有配对
+    的 tool_result（终态工具不回喂），真实 Anthropic API 会拒绝这种「悬空 tool_use」。
+    （可执行工具的 tool_use/tool_result 只在单回合内存 messages 里，本就不落库、不经过这里。）
+    """
     result: list[dict] = []
     for msg in session.messages:
         if msg.role == "user":
             result.append({"role": "user", "content": msg.content})
         elif msg.role == "assistant":
-            if msg.tool_use:
-                result.append({
-                    "role": "assistant",
-                    "content": [{"type": "tool_use", "name": msg.tool_use["name"],
-                                 "input": msg.tool_use["input"]}],
-                })
-            else:
-                result.append({"role": "assistant", "content": msg.content})
+            result.append({"role": "assistant", "content": msg.content})
     return result
 
 
@@ -339,13 +338,20 @@ async def handle_user_message(
         # ---- 可执行工具：执行 → 结果回喂 messages（内存，不落库、不吐 delta）→ 继续循环 ----
         if is_executable_tool(tool_result.name):
             result = _execute_tool(db, tool_result.name, tool_result.input)
+            # tool_use 与 tool_result 必须靠 id 配对（真实 Anthropic API 强制要求）
             messages.append({
                 "role": "assistant",
-                "content": [{"type": "tool_use", "name": tool_result.name, "input": tool_result.input}],
+                "content": [{
+                    "type": "tool_use", "id": tool_result.id,
+                    "name": tool_result.name, "input": tool_result.input,
+                }],
             })
             messages.append({
                 "role": "user",
-                "content": [{"type": "tool_result", "content": json.dumps(result, ensure_ascii=False)}],
+                "content": [{
+                    "type": "tool_result", "tool_use_id": tool_result.id,
+                    "content": json.dumps(result, ensure_ascii=False),
+                }],
             })
             continue
 
