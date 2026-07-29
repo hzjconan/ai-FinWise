@@ -382,10 +382,10 @@ def _make_product(db, code, name, risk_level, ret, status="active", ptype="混�
 
 
 def test_execute_search_products_returns_active_products_by_risk_level(db):
-    _make_product(db, "P-C4-A", "成长精选混合", "C4", "0.085")
-    _make_product(db, "P-C4-B", "科技行业ETF", "C4", "0.112", ptype="ETF")
-    _make_product(db, "P-C1", "稳盈货币A", "C1", "0.021")          # 别的等级 → 应排除
-    _make_product(db, "P-C4-D", "草稿产品", "C4", "0.090", status="draft")  # 非 active → 应排除
+    _make_product(db, "P-R4-A", "成长精选混合", "R4", "0.085")
+    _make_product(db, "P-R4-B", "科技行业ETF", "R4", "0.112", ptype="ETF")
+    _make_product(db, "P-R1", "稳盈货币A", "R1", "0.021")          # 别的等级 → 应排除
+    _make_product(db, "P-R4-D", "草稿产品", "R4", "0.090", status="draft")  # 非 active → 应排除
     db.commit()
 
     result = chat_service._execute_tool(db, chat_service.TOOL_SEARCH, {"risk_level": "C4"})
@@ -587,3 +587,56 @@ def test_loop_search_then_detail_then_conclude(db):
 
     # 中间两步不落库 —— 最终 ChatMessage 只有 ["user", "assistant"] 两条
     assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 2
+
+# 阶段三② 练习6 加硬校验：conclude 落库前校验 risk_preference ∈ C1–C5，非法则 error 不落库
+def test_invalid_risk_preference(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([_conclude_events(pref="C9")])
+
+    results = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    assert len(llm.calls) == 1
+    assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
+    assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 0
+    assert results[0]["event"] == "error"
+    assert results[0]["data"]["code"] == "invalid_risk_preference"
+
+def test_missing_risk_preference(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([
+        [ToolResult(name=chat_service.TOOL_CONCLUDE, input={})]
+    ])
+
+    results = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+    assert len(llm.calls) == 1
+    assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
+    assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 0
+    assert results[0]["event"] == "error"
+    assert results[0]["data"]["code"] == "invalid_risk_preference"
+
+def test_valid_matched_risk_level(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+
+    _make_product(db, "P-R4-B", "科技行业ETF", "R4", "0.112", ptype="ETF")
+    db.commit()
+
+    result = chat_service._execute_tool(db, chat_service.TOOL_SEARCH, {"risk_level": "C4"})
+    
+    assert result["risk_level"] == "C4"
+    assert len(result["products"]) == 1
+    p = result["products"][0]
+    assert p["product_code"] == "P-R4-B" and p["name"] == "科技行业ETF"
+
+def test_invalid_matched_risk_level(db):
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+
+    _make_product(db, "P-R4-B", "科技行业ETF", "R4", "0.112", ptype="ETF")
+    db.commit()
+
+    result = chat_service._execute_tool(db, chat_service.TOOL_SEARCH, {"risk_level": "C3"})
+    
+    assert result["risk_level"] == "C3"
+    assert len(result["products"]) == 0

@@ -27,8 +27,10 @@ from app.models.product import Product
 from app.services.llm.base import LLMClient
 from app.services.llm.events import LLMError, TextDelta, ToolResult
 from app.services.llm.prompts import load_system_prompt
-from app.services.risk_calculator import PREFERENCE_LABELS
+from app.services.risk_calculator import MATCH_RULES, PREFERENCE_LABELS
 from app.utils.code_generator import generate_code
+
+VALID_RISK_PREFERENCE = frozenset(PREFERENCE_LABELS)
 
 # Tool 名称常量
 TOOL_ASK = "ask_next_question"
@@ -114,9 +116,13 @@ def _execute_tool(db: Session, name: str, tool_input: dict) -> dict:
     """
     if name == TOOL_SEARCH:
         risk_level = tool_input.get("risk_level")
+        rules = MATCH_RULES.get(risk_level, [])
+        if len(rules) == 0:
+            return {"risk_level": risk_level, "products": []}
+        matched_risk_levels = rules.get("exact", [])
         products = (
             db.query(Product)
-            .filter(Product.status == "active", Product.risk_level == risk_level)
+            .filter(Product.status == "active", Product.risk_level.in_(matched_risk_levels))
             .order_by(Product.expected_return.desc())
             .all()
         )
@@ -344,6 +350,11 @@ async def handle_user_message(
         # 阶段三② 练习3 补「未知工具」防御
         if not is_terminal_tool(tool_result.name):
             yield {"event": "error", "data": {"code": "unknown_tool", "message": "未知工具"}}
+            return
+
+        # 阶段三② 练习6 加硬校验：conclude 落库前校验 risk_preference ∈ C1–C5，非法则 error 不落库
+        if tool_result.name == TOOL_CONCLUDE and tool_result.input.get("risk_preference") not in VALID_RISK_PREFERENCE:
+            yield {"event": "error", "data": {"code": "invalid_risk_preference", "message": "风险偏好无效"}}
             return
 
         # ---- 终态工具（ask / conclude）：吐 delta、落盘、收尾（行为与改造前一致）----
