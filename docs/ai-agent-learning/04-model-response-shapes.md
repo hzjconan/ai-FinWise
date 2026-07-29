@@ -215,3 +215,34 @@ ToolResult(name="conclude_assessment", input={…上面那个 dict…}, id="tool
 1. **`final_message.content` 是「块列表」，不是字符串**。一轮可能有 text 块 + tool_use 块。别把它当成一个 `.text`。
 2. **`tool_result` 是「我们」造的，不是模型返回的**。模型只返回 `tool_use`（它想调什么）；`tool_result`（执行结果）是**服务端**执行后自己拼回 messages 的。两者靠 `id`（`tool_use.id` ↔ `tool_result.tool_use_id`）配对。
 3. **可执行工具的一轮，对前端完全隐形**。它不落库、不吐 SSE，只在内存 messages 里累积。前端永远只看到终态工具的 delta/completed。
+
+---
+
+## 七、流式的两层视角：为什么用户不是「逐字」看到的
+
+一个反直觉的点：`handle_user_message` yield 的是 SSE 事件，看着像流式；但**对用户其实是「攒完再放」，不是实时逐字流**。分两层看：
+
+| 层 | 流式吗 | 说明 |
+|---|---|---|
+| `stream_chat`（LLM 客户端） | ✅ 真流式 | token 到一个吐一个 `TextDelta` |
+| `_call_llm_with_retry` | ❌ **缓冲** | `async for` 把整轮流**消费完、攒成 `deltas` 列表**才 return |
+| `handle_user_message` → 前端 | ❌ **回放** | 等 LLM 整轮答完后，delta 才成批 yield 成 SSE |
+
+关键代码（`_call_llm_with_retry`）：
+```python
+async for event in llm.stream_chat(...):     # stream_chat 确实是流式
+    if isinstance(event, TextDelta):
+        deltas.append(event)                  # 但这里全「攒进 list」
+    elif isinstance(event, ToolResult):
+        tool_result = event
+return "".join(text_parts), tool_result, llm_error, deltas   # 流「全部结束」后才 return
+```
+
+**对用户的效果**：不是打字机逐字，而是"等这轮 LLM 延迟结束 → 整段几乎同时到"。SSE 的"流式"是**事后回放**。
+
+### 为什么故意缓冲（两个真实原因）
+
+1. **重试要靠缓冲**：`_call_llm_with_retry` 失败会**重试整轮**。若 delta 已实时吐给用户、流到一半抛异常，就没法干净重试（用户已看到半截）。缓冲 = 要么整段成功、要么重试，不留半截。
+2. **可执行工具要"隐形"**：`tool_result` 是流**结束时**才拿到的（从 final_message）。只有等整轮结束、看到 `tool_result.name`，才知道这轮是"可执行(要藏)"还是"终态(要显示)"。缓冲让 loop 能**事后决定这批 delta 要不要吐**——可执行就丢弃（用户看不到"让我查一下产品…"），终态才回放。这正是「六.3 可执行工具对前端隐形」能成立的**机制**。
+
+> 一句话：**流式在 `stream_chat` 那层是真的，但被 `_call_llm_with_retry` 有意拦下缓冲了**——牺牲实时逐字体验，换来「可重试」+「可执行工具对用户隐形」。想要真正实时逐字流，得重构成"终态轮实时透传 / 可执行轮抑制"，难点在于 `tool_use` 在流末尾才到、开头还不知道这轮是哪种。
