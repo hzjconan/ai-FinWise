@@ -16,6 +16,7 @@
 - [余弦公式怎么来的（和直角三角形 cos 的关系）](#余弦公式怎么来的和直角三角形-cos-的关系)
 - [关键词匹配 vs 语义检索](#关键词匹配-vs-语义检索)
 - [完整 RAG 管线](#完整-rag-管线)
+- [工具库：numpy / sentence-transformers](#工具库numpy--sentence-transformers)
 - [常见追问](#常见追问)
 
 ---
@@ -185,6 +186,31 @@ cos = 1 / (1 × 1.414) ≈ 0.707    # 夹角 45°，中等相似
 ```
 
 对应 `scratch/s4_01_rag_embedding.py`：`CORPUS`（文档）→ `encode_docs`（向量化）→ `cosine_similarity` + `retrieve_top_k`（检索）。生成那步在 s4_02。
+
+---
+
+## 工具库：numpy / sentence-transformers
+
+s4_01 的两半：**sentence-transformers 造向量，numpy 拿向量算。**
+
+### numpy —— Python 数值计算地基
+- **是什么**：核心是 `ndarray`（N 维数组，连续内存+定类型）+ 一整套**向量化**运算，底层 C/SIMD，比 Python for 循环快几十上百倍。几乎所有 ML/数据库都建在它上。
+- **embedding 就是 float 数组**，所以点积/模长/矩阵乘都靠它。
+- 常用：`np.dot(a,b)`（点积）、`np.linalg.norm(a)`（模长）、`np.asarray(x)`、`x.shape`（如 `(7,384)`=7 篇×384 维）。
+- **向量化** = 对整个数组一次运算而非逐元素循环：`a*2`、`np.sum(a**2)`——又快又好读。
+
+### sentence-transformers —— 一行把文本变向量
+- **是什么**：把 transformer 包装成"文本 → embedding"，`model.encode(texts)` 直接出向量。
+- **建在** PyTorch + Hugging Face transformers 上，把「分词→过模型→池化成句向量→(可选)归一化」藏在 `.encode()` 后面。
+- **模型**首次加载从 Hugging Face Hub 下载权重（几百 MB），缓存到 `~/.cache`，之后离线可用。
+- `encode()` 默认**返回 numpy 数组**，正好交给 numpy 算余弦。
+
+### 接力关系
+```
+model.encode(文本)  ──▶  ndarray 向量  ──▶  np.dot / np.linalg.norm 算余弦 → top-k
+（造向量，黑箱）           （数据载体）        （检索核心，你的 TODO）
+```
+一句话：**sentence-transformers 把语义压进向量，numpy 在向量上算几何。**
 
 ---
 
