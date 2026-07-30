@@ -18,6 +18,7 @@
 - [关键词匹配 vs 语义检索](#关键词匹配-vs-语义检索)
 - [完整 RAG 管线](#完整-rag-管线)
 - [工具库：numpy / sentence-transformers](#工具库numpy--sentence-transformers)
+- [multilingual-e5-small（我们用的 embedding 模型）](#multilingual-e5-small我们用的-embedding-模型)
 - [常见追问](#常见追问)
 
 ---
@@ -238,6 +239,28 @@ model.encode(文本)  ──▶  ndarray 向量  ──▶  np.dot / np.linalg.n
 （造向量，黑箱）           （数据载体）        （检索核心，你的 TODO）
 ```
 一句话：**sentence-transformers 把语义压进向量，numpy 在向量上算几何。**
+
+---
+
+## multilingual-e5-small（我们用的 embedding 模型）
+
+拆名字：**multilingual**（多语言 100+，中英都行）+ **e5**（Microsoft 的 E5 家族，专为**检索**训练）+ **small**（尺寸档，还有 base/large）。HF id：`intfloat/multilingual-e5-small`。
+
+**关键规格**：
+- 输出 **384 维**；最大输入 ~**512 token**（超了截断）；权重 ~470MB，CPU 可跑。
+- **encoder-only**（类似 BERT）：活是"文本 → 向量"，**不生成文字**。和 Claude（decoder，生成文字）是两类不同的模型。
+
+**为什么要 `query:` / `passage:` 前缀**：E5 用**对比学习**训练——喂大量"查询-文档"配对，学会"匹配的 query 与 passage 向量靠近"。训练时两者就带不同前缀，用时必须照做，否则和训练分布不一致、检索质量掉。**前缀是模型"从小被这么教"的，不是随便加。**
+
+**尺寸档取舍**：
+
+| 档 | 参数/维度 | 取舍 |
+|---|---|---|
+| small | ~118M / 384 | 快、省、够用（学习期选它） |
+| base | ~278M / 768 | 中等 |
+| large | ~560M / 1024 | 质量最好，但慢、占内存 |
+
+一句话：E5 家族的**多语言、小号、专为检索训练**的 embedding 模型，输出 384 维、encoder-only，因对比训练需 `query:`/`passage:` 前缀。
 
 ---
 
