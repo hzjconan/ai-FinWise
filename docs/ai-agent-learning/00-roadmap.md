@@ -196,8 +196,8 @@
 | 一 LLM API 基础 | ✅ 已完成 | 2026-07-17 | s1_01/02/03 三个脚本 + 全部 TODO 已做并验证（结构化输出、流式事件、上下文即内存） |
 | 二 Prompt Engineering | ✅ 已完成 | 2026-07-19 | s2_01/02 + 全部 TODO 已做并验证（prompt即代码/锚点、结构化输出+字段顺序、抗注入+防御分层） |
 | 三 Tool Use ★ | ✅ 已完成 | 2026-07-29 | scratch 手写 loop（A `s3_01` / B `s3_02`）+ B#3–B#7 真实 chat_service agent loop（可执行/终态工具、MAX_STEPS、未知工具防御、conclude 硬校验、search C→R、定级去模型化、维度三层校验）+ 对接真实 API 的 tool_use/tool_result id 配对；复盘见 docs 03/04/05 |
-| 四 RAG / 上下文工程 | 🟡 进行中 | | |
-| 五 评估与可观测性 ★ | ⬜ 未开始 | | 挂了 B#8（conclude 字段顺序 A/B），见本阶段"待办" |
+| 四 RAG / 上下文工程 | ✅ 已完成 | 2026-08-10 | s4_01 检索(手写余弦/top-k) / s4_02 生成+grounding / s4_02b grounding 硬校验(第3层)+自测 / s4_03 TF-IDF vs embedding(语义>关键词) / s4_04 chunking A/B/C(没有最优切法)；概念沉淀见 concepts-basics（对比学习/自监督/grounding分层/chunking） |
+| 五 评估与可观测性 ★ | ⬜ 未开始 | | 挂了 B#8（conclude 字段顺序 A/B），见本阶段"待办"；多处已埋 eval 伏笔（检索命中率、chunk 超参、字段顺序）|
 | 六 框架与多 Agent | ⬜ 未开始 | | |
 | 七 生产化 | ⬜ 未开始 | | |
 
