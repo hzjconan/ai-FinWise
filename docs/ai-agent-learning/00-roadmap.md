@@ -141,7 +141,7 @@
 - [ ] 改 prompt 后能立刻看到分数升降。
 - [ ] 能在 trace 里定位到 agent 哪一步出了问题。
 
-**本阶段挂的待办 · B#8（字段顺序 A/B）**：把 `conclude_assessment` 的字段顺序改成「依据在前、结论在后」（`dimensions → summary → risk_preference → content`，见 `05-field-order-and-schema-as-prompt.md`）。这是纯**质量**改动，单测测不出——正好用本阶段的 eval **A/B 两种顺序**，量出维度打分质量/定级准确率有没有变。用它当 eval 的**第一个真实练习对象**（有明确假设、有可测目标），而不是凭理论盲改 schema。
+**本阶段挂的待办 · B#8（字段顺序 A/B）** ✅ 已做（s5_02）：用真机 A/B eval 测 conclude 字段顺序（A 结论在前 / B dimensions 打头）对定级准确率的影响。结果 A=4/4、B=3/4，但 **n=4+单轮+边界噪声 → 分辨率不足以下结论**；理性决定**不改**（"数据不足以支持改动"也是有效结论）。收获在元认知：质疑 eval 要三层（题/样本量/噪声），见 `concepts-basics` Eval 节。副产物：发现 **C1 定级数学不可达**（下限 C2），待查是否 bug。
 
 ---
 
@@ -197,7 +197,7 @@
 | 二 Prompt Engineering | ✅ 已完成 | 2026-07-19 | s2_01/02 + 全部 TODO 已做并验证（prompt即代码/锚点、结构化输出+字段顺序、抗注入+防御分层） |
 | 三 Tool Use ★ | ✅ 已完成 | 2026-07-29 | scratch 手写 loop（A `s3_01` / B `s3_02`）+ B#3–B#7 真实 chat_service agent loop（可执行/终态工具、MAX_STEPS、未知工具防御、conclude 硬校验、search C→R、定级去模型化、维度三层校验）+ 对接真实 API 的 tool_use/tool_result id 配对；复盘见 docs 03/04/05 |
 | 四 RAG / 上下文工程 | ✅ 已完成 | 2026-08-10 | s4_01 检索(手写余弦/top-k) / s4_02 生成+grounding / s4_02b grounding 硬校验(第3层)+自测 / s4_03 TF-IDF vs embedding(语义>关键词) / s4_04 chunking A/B/C(没有最优切法)；概念沉淀见 concepts-basics（对比学习/自监督/grounding分层/chunking） |
-| 五 评估与可观测性 ★ | ⬜ 未开始 | | 挂了 B#8（conclude 字段顺序 A/B），见本阶段"待办"；多处已埋 eval 伏笔（检索命中率、chunk 超参、字段顺序）|
+| 五 评估与可观测性 ★ | ✅ 已完成 | 2026-08-11 | s5_01 检索 eval(Hit@K/MRR + 两套 golden set 证明"结论取决于题") / s5_02(B#8) 字段顺序真机 A/B eval(+单点容错)——元认知：质疑题/样本量/噪声、"数据不足→不改"也是结论；概念见 concepts-basics「Eval」。tracing/可观测性未做（可后续补） |
 | 六 框架与多 Agent | ⬜ 未开始 | | |
 | 七 生产化 | ⬜ 未开始 | | |
 
