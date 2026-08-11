@@ -27,6 +27,7 @@
 - [生成模型 vs embedding 模型（输出不同）](#生成模型-vs-embedding-模型输出不同)
 - [参数 vs 维度](#参数-vs-维度)
 - [Eval：给不确定输出打分（Hit@K / MRR / 召回·精确 / golden set）](#eval给不确定输出打分hitk--mrr--召回精确--golden-set)
+- [Agent 框架：本质是"手写 loop 的封装"](#agent-框架本质是手写-loop-的封装)
 - [常见追问](#常见追问)
 
 ---
@@ -493,6 +494,30 @@ s5_02 用真机 A/B eval 测"conclude 字段顺序改动值不值"（A 结论在
 
 ### eval 工程：批量真机调用必须容错
 真机 eval 跑几十次 LLM 调用，**必然遇到偶发失败**（s5_02 里 claude CLI 偶发返回 1）。脚本若"单点失败就整轮崩"，你永远跑不完一轮——A 组运气好跑完、B 组第一个就挂。修法：`try` 兜住单次运行、记为 ERR 继续，别让一个失败毁掉整个 eval。
+
+---
+
+## Agent 框架：本质是"手写 loop 的封装"
+
+前面（B#3–B#7）**亲手**写过 agent loop：`for _ in range(MAX_STEPS)`、判断 tool_use、执行工具、成对回喂 tool_use+tool_result、配 id、终止判断。**框架（如 Anthropic SDK 的 `tool_runner`）做的就是把这套整个包掉**——不是魔法，是"你写过的那个 for 循环的官方版"。
+
+**手写 vs 框架逐条对照（s6_01，以 `tool_runner` 为例）**：
+
+| 你手写的 | 框架替你做的 |
+|---|---|
+| `for _ in range(MAX_STEPS)` | 内部循环 + `max_iterations` 参数 |
+| `if block.type=='tool_use'` | 自动识别 tool_use |
+| `_execute_tool` 按名分发 | 按 name 自动调用你的工具函数 |
+| 手拼 tool_use+tool_result、配 id | 自动拼、自动配 `tool_use_id` |
+| `messages.append(...)` + continue | `append_messages` + 自动续调 |
+| 终态判断 / break | 模型不再调工具 = 迭代耗尽 = 自动停 |
+| 工具 = schema dict + 执行函数（两块） | `@beta_tool`：**一个函数 = schema + 实现**（装饰器从签名+docstring 自动生成 schema） |
+
+**核心认知**：
+1. **框架不是黑箱——因为你裸手写过一遍**。别人看框架只觉得"有个神奇东西自动跑了"，出问题两眼一抹黑；你能一眼定位"这是 id 没配对""这是撞了 max_iterations"。**裸调五个阶段的回报，就是框架对你透明**。这也是"先裸调建直觉、再学框架"路线的意义。
+2. **runner 是迭代器：遍历它 = 驱动 loop**（`for message in runner` 每摇一步 = agent 走一轮，框架在幕后执行工具+回喂+续调；模型不再调工具→迭代耗尽→自动停）。见 [[python-syntax-notes]] 迭代器。
+3. **框架高级封装依赖更完整的 API**：`tool_runner` 内部用 beta `messages.parse`，本地 bridge（简化 shim）撑不起 → 崩。**手写 loop 反而更 portable**（只用最基础的 messages 接口）。生产里换框架，"底层依赖不匹配"是常见坑。
+4. **什么时候上框架**：样板代码（loop/schema/回喂）重复且稳定时，框架省事、少出错。但要能**看穿**它，否则调试成本更高。工程判断，不是越框架越好。
 
 ---
 
