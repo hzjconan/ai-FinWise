@@ -28,6 +28,7 @@
 - [参数 vs 维度](#参数-vs-维度)
 - [Eval：给不确定输出打分（Hit@K / MRR / 召回·精确 / golden set）](#eval给不确定输出打分hitk--mrr--召回精确--golden-set)
 - [Agent 框架：本质是"手写 loop 的封装"](#agent-框架本质是手写-loop-的封装)
+- [Tracing（可观测性）：看进一次运行内部](#tracing可观测性看进一次运行内部)
 - [常见追问](#常见追问)
 
 ---
@@ -518,6 +519,36 @@ s5_02 用真机 A/B eval 测"conclude 字段顺序改动值不值"（A 结论在
 2. **runner 是迭代器：遍历它 = 驱动 loop**（`for message in runner` 每摇一步 = agent 走一轮，框架在幕后执行工具+回喂+续调；模型不再调工具→迭代耗尽→自动停）。见 [[python-syntax-notes]] 迭代器。
 3. **框架高级封装依赖更完整的 API**：`tool_runner` 内部用 beta `messages.parse`，本地 bridge（简化 shim）撑不起 → 崩。**手写 loop 反而更 portable**（只用最基础的 messages 接口）。生产里换框架，"底层依赖不匹配"是常见坑。
 4. **什么时候上框架**：样板代码（loop/schema/回喂）重复且稳定时，框架省事、少出错。但要能**看穿**它，否则调试成本更高。工程判断，不是越框架越好。
+
+---
+
+## Tracing（可观测性）：看进一次运行内部
+
+**Tracing = 把一次运行的详细执行过程逐步记录下来，让你"看进"内部到底发生了什么。** 对普通程序用断点/日志调试；但 LLM agent 是**多步 + 不确定**的（多次 LLM 调用、多次工具调用、多节点流转），出问题时需要看清每一步的**输入/输出/耗时/token**。tracing 就是自动全程录下来。
+
+**一次 trace = 一棵带层级的步骤树（span/trace）**（以 s6_02 多 agent 为例）：
+```
+trace: supervisor("我炒股5年…")                    ← 一次完整运行
+├─ span: assessment_agent
+│   └─ LLM call: assess  in={desc} out={dims} 0.8s 120tok
+├─ span: retrieve_products  in="C4" out=[P-R4]
+└─ span: recommendation_agent
+    └─ LLM call: recommend  in={等级+候选} out={P-R4,理由} 0.9s 200tok
+```
+每个 span 记：输入/输出/耗时/token·成本/模型/嵌套关系 → 一眼看清数据怎么流、哪步慢/贵/错。
+
+**为什么 LLM/agent 特别需要**：① 多步+不确定 → 结论错了是评估打错分？检索没召回？还是推荐幻觉？**逐 span 看直接定位到出错那步**（print 调试在 10 节点的图里抓瞎）；② 成本/延迟可见（每次调用 token+耗时）；③ 可复盘/回放。
+
+**你其实手搓过 tracing**：a2 的 `ToolLoggingLLM`（包在 LLM 外、打印每次工具调用）就是手搓探针。专业工具（**LangSmith / Langfuse**）做的是同一件事，只是**自动 + 结构化（span 树/耗时/token）+ 有 UI（时间线、调用树、点开看 prompt/response、回放）**。
+
+**tracing vs eval（可观测性的两半，别混）**：
+
+| | 问什么 |
+|---|---|
+| **eval** | 结果**好不好**（质量、打分：Hit@K/MRR…） |
+| **tracing** | 过程里**发生了什么**（可见性：哪步慢/贵/错） |
+
+eval 告诉你"变差了"，tracing 告诉你"**为什么**变差、卡在哪步"。生产里两个都要。（阶段六 lg_06 会把手搓的 ToolLoggingLLM 换成 LangSmith，看 LangGraph 图每步轨迹——补上阶段五留的可观测性坑。）
 
 ---
 
