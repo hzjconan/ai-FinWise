@@ -103,16 +103,21 @@ def test_start_unknown_customer_returns_404(client, mock_llm):
     assert resp.status_code == 404
 
 
-def test_start_llm_failure_returns_503(client, customer_code, mock_llm):
-    def boom():
-        raise RuntimeError("down")
+def test_start_llm_failure_returns_503(client, customer_code, mock_llm, monkeypatch):
+    from app.services import chat_service
+    monkeypatch.setattr(chat_service, "RETRY_BASE_DELAY", 0)   # 免真退避 sleep
 
-    # 两次都失败（service 层内会重试 1 次）
-    mock_llm.push(boom)
-    mock_llm.push(boom)
+    def boom():
+        raise RuntimeError("INTERNAL-secret-detail-xyz")   # 内部细节，不该外泄
+
+    for _ in range(chat_service.MAX_LLM_ATTEMPTS):   # 每次都失败，耗尽重试
+        mock_llm.push(boom)
 
     resp = client.post("/api/v1/assessment/chat/start", json={"customer_code": customer_code})
     assert resp.status_code == 503
+    # S3：对外只给通用文案，不泄露原始异常内部细节
+    assert "INTERNAL-secret-detail-xyz" not in resp.text
+    assert "请稍后重试" in resp.json()["detail"]
 
 
 # ---------- /message ----------

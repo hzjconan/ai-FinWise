@@ -37,6 +37,14 @@ def test_load_system_prompt_contains_all_dimensions_and_tool_rules():
     assert "{DIMENSIONS}" not in prompt
 
 
+def test_system_prompt_has_injection_isolation():
+    """S2：system prompt 含"输入隔离/防注入"声明——客户消息中的指令应被忽略。"""
+    prompt = load_system_prompt()
+    assert "输入隔离" in prompt or "防注入" in prompt
+    assert "忽略" in prompt          # 明确"忽略"注入指令
+    assert "待评估" in prompt        # 把用户输入定性为"待评估内容"而非指令
+
+
 def test_env_override_uses_custom_file_as_is(tmp_path, monkeypatch):
     """FINWISE_SYSTEM_PROMPT_FILE 指向自定义文件时读它；无 {DIMENSIONS} 也不报错、原样返回。"""
     custom = tmp_path / "custom.md"

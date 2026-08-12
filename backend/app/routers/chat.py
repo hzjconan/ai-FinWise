@@ -7,6 +7,7 @@
 """
 
 import json
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,6 +26,10 @@ from app.services.llm.base import LLMClient
 from app.services.llm.factory import get_llm_client
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# S3：对外只给通用文案，原始异常细节（可能含内部实现/依赖/敏感信息）只进服务端日志。
+_AI_UNAVAILABLE = "AI 暂时无法响应，请稍后重试"
 
 
 def _serialize_sse(event: str, data: dict) -> bytes:
@@ -53,7 +58,8 @@ async def start_chat(
     try:
         await chat_service.generate_opening(db, session, llm)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"AI 暂时无法响应：{e}") from e
+        logger.warning("生成开场白失败", exc_info=e)   # 详情只进服务端日志
+        raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from e
 
     db.refresh(session)
     return ChatStartResponse(
@@ -104,7 +110,8 @@ async def restart_chat(
     try:
         await chat_service.generate_opening(db, session, llm)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"AI 暂时无法响应：{e}") from e
+        logger.warning("生成开场白失败", exc_info=e)   # 详情只进服务端日志
+        raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from e
 
     db.refresh(session)
     return ChatStartResponse(
