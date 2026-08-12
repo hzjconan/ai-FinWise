@@ -27,6 +27,7 @@
 - [生成模型 vs embedding 模型（输出不同）](#生成模型-vs-embedding-模型输出不同)
 - [参数 vs 维度](#参数-vs-维度)
 - [Eval：给不确定输出打分（Hit@K / MRR / 召回·精确 / golden set）](#eval给不确定输出打分hitk--mrr--召回精确--golden-set)
+- [ReAct：推理+行动交替（agent loop 的正式名字）](#react推理行动交替agent-loop-的正式名字)
 - [Agent 框架：本质是"手写 loop 的封装"](#agent-框架本质是手写-loop-的封装)
 - [Tracing（可观测性）：看进一次运行内部](#tracing可观测性看进一次运行内部)
 - [Harness Engineering：给模型造脚手架（统领全局）](#harness-engineering给模型造脚手架统领全局)
@@ -496,6 +497,27 @@ s5_02 用真机 A/B eval 测"conclude 字段顺序改动值不值"（A 结论在
 
 ### eval 工程：批量真机调用必须容错
 真机 eval 跑几十次 LLM 调用，**必然遇到偶发失败**（s5_02 里 claude CLI 偶发返回 1）。脚本若"单点失败就整轮崩"，你永远跑不完一轮——A 组运气好跑完、B 组第一个就挂。修法：`try` 兜住单次运行、记为 ERR 继续，别让一个失败毁掉整个 eval。
+
+---
+
+## ReAct：推理+行动交替（agent loop 的正式名字）
+
+**ReAct = Reasoning + Acting**（2022 论文提出）：让模型"想一步、做一步、根据工具结果再想下一步"——推理和行动**交替循环**，而非一口气想完/做完。一个回合：
+```
+Thought（想）      : 我需要知道 C4 等级有哪些产品
+Action（做）        : 调 search_products("C4")
+Observation（看结果）: [P-R4 成长精选混合]        ← 工具返回
+Thought（想）      : 有产品了，可以推荐
+Action（做）        : 给出最终推荐
+```
+关键：**每次行动后拿到真实观察（工具结果），喂回去让模型基于事实继续推理**。对比——纯 Reasoning（闷头想不查）易幻觉；纯 Acting（机械执行）不灵活；ReAct 交织两者：既接地、又能随结果调整。
+
+**你早就手写实现过 ReAct**：B#3–B#7 的 `for _step in range(MAX_STEPS)` loop——"模型调工具(Act)→执行返回结果(Observe)→回喂→模型继续(Reason)→再调或收尾"——**就是一个 ReAct loop**，只是当时没用这个名字。所以：
+
+- **ReAct = agent loop 的正式名字**（推理与行动交替）；
+- **`create_react_agent`（LangGraph 预制件）/ `tool_runner`** = 把这个 loop 预制成一行，内部就是 `agent(想/调工具) ⇄ tools(执行/返回观察)` 的循环图——和你手写的是同一个东西。它靠"模型不再调工具（返回纯文本 end_turn）"来收尾（见 [[agent-框架本质是手写-loop-的封装]]）。
+
+一句话：**ReAct = 让模型"想一步做一步、看工具结果再决定"的范式，就是你手写过的那个 agent loop。**
 
 ---
 
