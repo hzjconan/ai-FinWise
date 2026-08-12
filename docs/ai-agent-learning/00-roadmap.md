@@ -197,8 +197,8 @@
 | 二 Prompt Engineering | ✅ 已完成 | 2026-07-19 | s2_01/02 + 全部 TODO 已做并验证（prompt即代码/锚点、结构化输出+字段顺序、抗注入+防御分层） |
 | 三 Tool Use ★ | ✅ 已完成 | 2026-07-29 | scratch 手写 loop（A `s3_01` / B `s3_02`）+ B#3–B#7 真实 chat_service agent loop（可执行/终态工具、MAX_STEPS、未知工具防御、conclude 硬校验、search C→R、定级去模型化、维度三层校验）+ 对接真实 API 的 tool_use/tool_result id 配对；复盘见 docs 03/04/05 |
 | 四 RAG / 上下文工程 | ✅ 已完成 | 2026-08-10 | s4_01 检索(手写余弦/top-k) / s4_02 生成+grounding / s4_02b grounding 硬校验(第3层)+自测 / s4_03 TF-IDF vs embedding(语义>关键词) / s4_04 chunking A/B/C(没有最优切法)；概念沉淀见 concepts-basics（对比学习/自监督/grounding分层/chunking） |
-| 五 评估与可观测性 ★ | ✅ 已完成 | 2026-08-11 | s5_01 检索 eval(Hit@K/MRR + 两套 golden set 证明"结论取决于题") / s5_02(B#8) 字段顺序真机 A/B eval(+单点容错)——元认知：质疑题/样本量/噪声、"数据不足→不改"也是结论；概念见 concepts-basics「Eval」。tracing/可观测性未做（可后续补） |
-| 六 框架与多 Agent | ⬜ 未开始 | | |
-| 七 生产化 | ⬜ 未开始 | | |
+| 五 评估与可观测性 ★ | ✅ 已完成 | 2026-08-11 | s5_01 检索 eval(Hit@K/MRR + 两套 golden set 证明"结论取决于题") / s5_02(B#8) 字段顺序真机 A/B eval(+单点容错)——元认知：质疑题/样本量/噪声、"数据不足→不改"也是结论；概念见 concepts-basics「Eval」。tracing 在阶段六 lg_06 补上 |
+| 六 框架与多 Agent | ✅ 已完成 | 2026-08-12 | s6_01 tool_runner(离线看穿) / s6_02 手写多 agent supervisor / LangGraph（隔离 venv langgraph-lab）：lg_01 线性图 / lg_02 循环图(回边+循环安全) / lg_04 ChatAnthropic / lg_05 create_react_agent(ReAct) / lg_06 LangSmith tracing + 教学 mock bridge。概念：harness engineering、ReAct、框架=手写loop封装、State/Node/Edge、recursion_limit/工具错误处理。笔记见 langgraph-notes；LangGraph 用隔离环境+独立代码 |
+| 七 生产化 | 🟡 进行中 | | |
 
 状态图例：⬜ 未开始 / 🟡 进行中 / ✅ 已完成
