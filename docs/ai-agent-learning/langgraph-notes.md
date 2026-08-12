@@ -13,6 +13,8 @@
 - [LangGraph 是什么 / 官方资源](#langgraph-是什么--官方资源)
 - [核心抽象：State / Node / Edge](#核心抽象state--node--edge)
 - [手写 supervisor ↔ LangGraph 对照](#手写-supervisor--langgraph-对照)
+- [State 设计：契约不是垃圾桶（长任务怎么不失控）](#state-设计契约不是垃圾桶长任务怎么不失控)
+- [错误处理：节点抛异常 = 整图崩](#错误处理节点抛异常--整图崩)
 - [核心认知：框架不是魔法](#核心认知框架不是魔法)
 
 ---
@@ -99,6 +101,35 @@ result = app.invoke({"customer_desc": desc})   # 跑图，传入初始 State
 - **并行**：多节点同时跑再汇合，图天然表达。
 
 **但**：简单线性编排（A→检索→B 一条直线）**手写反而更简洁**——LangGraph 的价值在复杂图。**简单编排手写、复杂编排上图**，工程判断，不是越框架越好。（呼应 [[concepts-basics]] "Agent 框架"节的"何时上框架"。）
+
+---
+
+## State 设计：契约不是垃圾桶（长任务怎么不失控）
+
+**疑问**：State 全局、会包含每步输出，长任务里岂不很重、难维护、不知哪个字段哪个 step 写的？
+
+**先纠正**：State **不自动累积每一步输出**——它只包含节点主动 `return` 的字段。`return {"risk_level":"C4"}` 只写这一个；`return {}` 什么都不写；节点内部的中间变量（临时列表、计数）**留本地、不进 State**。**State 大小是你设计的，不是自动膨胀。**
+→ 第一原则：**只往 State 放"跨节点要用"的数据，中间量留节点本地**（lg_01 的 assess_node 算了 values/normalized 但只 return risk_level+dimensions）。
+
+**长任务变重时的管理手段（由轻到重）**：
+1. **字段标注归属**：每个字段注释"谁写的"（`risk_level: str  # assess 节点写`）——约定=可维护性。
+2. **按域分组（嵌套）**：别 flat 铺开，`assessment: dict` / `recommendation: dict` 按产出方聚成子 dict。
+3. **input/output schema 分离**：`StateGraph(State, input_schema=..., output_schema=...)`——内部 State 可丰富，对外只暴露窄接口。
+4. **subgraph（子图）——规模化的真正答案**：大系统不该是一个巨型 flat State，而是**拆成多个子图**，每个子图有自己的小 State，父图只看子图的汇总输出（像函数拆分，不把所有变量塞进全局作用域）。
+
+**反直觉的点**：State 其实比手写"散变量"**更**可维护——手写时 risk_level/products 是散落在函数里的局部变量、靠读代码追数据流；State 把跨节点数据收进**一个声明式、带类型的 TypedDict**，一览无余还能类型检查。
+
+一句话：**State 是你设计的"跨节点数据契约"，不是自动堆东西的垃圾桶。** 重了就靠 标注归属 / 按域嵌套 / input-output schema / subgraph 拆分。
+
+---
+
+## 错误处理：节点抛异常 = 整图崩
+
+**LangGraph 默认：任何节点抛异常 → 整个 `app.invoke()` 崩**（和手写 supervisor"一个 await 失败整个函数崩"一样，框架不自动容错）。lg_01 就撞到：bridge 偶发失败 → assess 节点抛 → 整图崩。
+
+两个层面的容错：
+1. **节点内自己兜**（最直接）：节点里的 LLM 调用加 try/重试（lg_01 的 `call_bridge_tool` 加了 retries）。
+2. **节点级 retry_policy（LangGraph 原生）**：`g.add_node("assess", assess_node, retry=RetryPolicy(max_attempts=3))`——框架帮你重试失败节点，不用自己写 try。这是"框架多给你的"一个容错特性（对照手写要自己包）。lg_02 会正式用。
 
 ---
 
