@@ -17,6 +17,7 @@
 - [浮点比较：别用 ==，用 math.isclose](#浮点比较别用--用-mathisclose)
 - [推导式 / any / all（对应 JS filter/map/some/every）](#推导式--any--all对应-js-filtermapsomeevery)
 - [解包必须数量精确](#解包必须数量精确)
+- [Literal 类型标注（vs Enum）](#literal-类型标注vs-enum)
 
 ---
 
@@ -149,3 +150,37 @@ a, b, *_ = func()      # 只取前 2 个、丢弃其余（四元组只要前两�
 ```
 
 不像 JS 解构可以只取前几个、多的自动忽略——**Python 数量必须对上**（用 `*_` 吞尾部）。
+
+---
+
+## Literal 类型标注（vs Enum）
+
+`from typing import Literal`（标准库，PEP 586，Python 3.8+）。把值**限定为"这几个字面量之一"**：
+```python
+def f(x) -> Literal["a", "b"]:    # 返回值只可能是 "a" 或 "b"
+    ...
+mode: Literal["r", "w", "a"]      # 只能取这三个字符串之一
+status: Literal[200, 404]         # 数字/布尔字面量也行
+```
+**只是类型标注、运行时不强制**（`return "xyz"` 照跑不报错）——给类型检查器（mypy/pyright/IDE）看，价值是开发期抓错 + 自文档。
+
+**框架常"消费"它**：LangGraph 读路由函数的 `Literal` 返回标注来画条件边、pydantic/FastAPI 读类型注解做校验/解析——注解是 Python 的，框架只是利用。所以学会它到处能用。
+
+### vs Enum
+| | `Literal["r","w"]` | `Enum` |
+|---|---|---|
+| 本质 | 类型注解（别名） | 一个**类**，成员是对象 |
+| 运行时实体 | 无（纯静态提示） | **有**，`Mode.R` 是真实对象 |
+| 值 | 就是字面量本身 `"r"` | 成员对象，`.value` 才是 `"r"` |
+| 运行时强制 | 不检查 | 真实（得用 `Mode.R`） |
+| 带行为 | 不能 | 能：方法、`list(Mode)` 迭代、`.name/.value`、防重复 |
+| 重量 | 极轻（一行） | 重（定义类） |
+
+```python
+def set_mode(m: Literal["r", "w"]): ...；  set_mode("r")          # 直接传字符串
+class Mode(Enum): R="r"; W="w"
+def set_mode(m: Mode): ...；               set_mode(Mode.R)       # 传枚举成员对象
+```
+
+**怎么选**：值本来就是简单字符串/数字、只想约束取值、不想多定义类 → **Literal**（轻）。需要运行时具名常量、迭代、带方法/行为、强类型对象 → **Enum**（重但强）。
+（lg_02 路由函数返回节点名字符串，LangGraph 期望字符串 → 用 Literal 最自然；用 Enum 还得 `.value` 转回字符串反而绕。）
