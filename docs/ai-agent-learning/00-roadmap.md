@@ -199,6 +199,6 @@
 | 四 RAG / 上下文工程 | ✅ 已完成 | 2026-08-10 | s4_01 检索(手写余弦/top-k) / s4_02 生成+grounding / s4_02b grounding 硬校验(第3层)+自测 / s4_03 TF-IDF vs embedding(语义>关键词) / s4_04 chunking A/B/C(没有最优切法)；概念沉淀见 concepts-basics（对比学习/自监督/grounding分层/chunking） |
 | 五 评估与可观测性 ★ | ✅ 已完成 | 2026-08-11 | s5_01 检索 eval(Hit@K/MRR + 两套 golden set 证明"结论取决于题") / s5_02(B#8) 字段顺序真机 A/B eval(+单点容错)——元认知：质疑题/样本量/噪声、"数据不足→不改"也是结论；概念见 concepts-basics「Eval」。tracing 在阶段六 lg_06 补上 |
 | 六 框架与多 Agent | ✅ 已完成 | 2026-08-12 | s6_01 tool_runner(离线看穿) / s6_02 手写多 agent supervisor / LangGraph（隔离 venv langgraph-lab）：lg_01 线性图 / lg_02 循环图(回边+循环安全) / lg_04 ChatAnthropic / lg_05 create_react_agent(ReAct) / lg_06 LangSmith tracing + 教学 mock bridge。概念：harness engineering、ReAct、框架=手写loop封装、State/Node/Edge、recursion_limit/工具错误处理。笔记见 langgraph-notes；LangGraph 用隔离环境+独立代码 |
-| 七 生产化 | 🟡 进行中 | | |
+| 七 生产化 | ✅ 已完成 | 2026-08-12 | FinWise 真实代码生产化体检：基线报告(06)→逐项分析→修复 R1 重试策略(可/不可重试+指数退避,provider无关)/L1 超时/S2 prompt注入隔离(软约束+B#7硬保证纵深防御)/S3 错误不外泄→对比报告(06b)。元收获：风险放业务约束看(S1匿名越权=业务选择)、"不改"也是决策(C1/C2/R2/L2)。139→140 passed |
 
 状态图例：⬜ 未开始 / 🟡 进行中 / ✅ 已完成
