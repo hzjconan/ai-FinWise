@@ -16,6 +16,7 @@
 - [State 设计：契约不是垃圾桶（长任务怎么不失控）](#state-设计契约不是垃圾桶长任务怎么不失控)
 - [可视化：draw_mermaid / 条件边要声明才画得出](#可视化draw_mermaid--条件边要声明才画得出)
 - [错误处理：节点抛异常 = 整图崩](#错误处理节点抛异常--整图崩)
+- [工具报错 + 三种"限制/重试"（recursion_limit / RetryPolicy / handle_tool_errors）](#工具报错--三种限制重试recursion_limit--retrypolicy--handle_tool_errors)
 - [核心认知：框架不是魔法](#核心认知框架不是魔法)
 
 ---
@@ -175,6 +176,39 @@ get_graph().edges 里每条边：             draw_mermaid 翻译：
 - **教训**：别只查"端点在不在"就断言能用——要真跑。（这次先验证才挖出真相。）
 - **进阶篇（lg_04 ChatAnthropic）用教学 mock bridge——✅ 已验证可行**：`langgraph-lab/mock_bridge.py`（FastAPI，端口 8788）。根因：真 bridge 只支持 `stream=true`（SSE），而 `ChatAnthropic.invoke()` 默认走**非流式**、期望完整 Message JSON → 对不上就崩。mock 不接真模型，只做一件事：收到 `POST /v1/messages` 就按请求里的工具名返回一个**结构合法的非流式 Anthropic Message JSON**（`{id,type:message,role,model,content:[{type:tool_use,id,name,input}],stop_reason:tool_use,usage}`），input 写死（离线、确定）。实测 `ChatAnthropic(anthropic_api_url="http://localhost:8788").bind_tools([...]).invoke(...)` 成功解析出 `tool_calls`。
   起服务：`cd langgraph-lab && .venv/bin/uvicorn mock_bridge:app --port 8788`。
+
+---
+
+## 工具报错 + 三种"限制/重试"（recursion_limit / RetryPolicy / handle_tool_errors）
+
+ReAct agent（create_react_agent）里工具执行失败怎么办？三个**不同**的机制，别混（都在 langgraph 1.2.10 实测过）：
+
+### ① 工具报错 → handle_tool_errors（ToolNode）—— 默认捕获、当观察喂回模型，不重试
+create_react_agent 内部的 tools 节点是 **`ToolNode`**，有 `handle_tool_errors` 参数、**默认开启**（默认值是个处理函数）。工具 `raise` 时：**捕获异常 → 包成 `ToolMessage("Error: ...")` → 喂回模型**，让模型据此**自我纠错**（换参数重试/换工具/告知用户）。**它不"重试工具"**，只喂回错误一次；模型是否再调是模型的自由选择，不是框架的重试计数。
+- 配置：`False`=不捕获（异常冒出→整图崩）；`"字符串"`=自定义错误文案；`函数(异常)->str`=自定义；异常类型元组=只捕这几类。
+- ⚠️ **和普通节点相反**：[[错误处理节点抛异常--整图崩]]说自定义节点默认抛异常=崩；但**预制 ToolNode 例外**，默认捕工具错（因为工具失败是 agent 最常见的事，交模型自纠最自然）。
+
+### ② recursion_limit —— 防"无限循环"的崩溃兜底（不是重试计数）
+限的是**一次运行走了多少个顺序"超级步"**（≈ 循环圈数 × 每圈节点数；ReAct 一圈 agent→tools→agent ≈ 2~3 步），**不是图的节点总数**。超了 → `GraphRecursionError` 硬崩。
+- **默认 = 10007**（本版本实测！网上常说的 25 不适用本版本）——**大到约等于没上限，生产必须手动设**。
+- **per-invocation，不是全局**（实测：同一 app 传 `{"recursion_limit":5}` 和 `{"recursion_limit":12}` 各自在第 5/12 步崩）。设法：`app.invoke(x, {"recursion_limit":20})` 或 `app.with_config({"recursion_limit":20})`。没有"全局默认"开关——配置随调用传（RunnableConfig 机制）。
+- **怎么定**：按"该工作流健康运行的最大步数 + 余量"（简单几十、复杂几百），**不是固定小数字**。⚠️ 澄清一个易错点：节点多≠limit 要大——线性图一次只走一条路径，20 节点流水线一次≈20 步；只有**有环**才靠圈数堆步数。
+
+### ③ RetryPolicy —— 节点级自动重试，默认【不启用】
+给节点加 `retry=RetryPolicy()`，节点抛异常时**自动重跑该节点**，`max_attempts` 默认 **3**。但 **create_react_agent 默认不加它** → 默认没有节点自动重试。
+
+### ★ 真正该控制"循环几次"的：State 业务计数器（不是 recursion_limit）
+recursion_limit 是**最后的崩溃兜底**，别拿它当业务停止条件。真正控制"最多重评 3 次"要用 **State 里的计数器 + 条件边优雅路由到 END**（lg_02 的 `attempts`）：
+| | 谁停 | 怎么停 | 定多少 |
+|---|---|---|---|
+| State 计数器（lg_02 attempts） | 业务逻辑 | 优雅路由 END | 按业务（"最多 3 次"） |
+| recursion_limit | 框架兜底 | 崩（GraphRecursionError） | 健康上限+余量，防失控 |
+**正常运行靠 State 计数器优雅收尾、永远碰不到 recursion_limit；只有逻辑写错/模型死犟失控时，limit 才作为最后保险崩掉止损。** 所以设"小"了也不会切断正常工作——正常工作早在计数器那儿停了。
+
+### 和 FinWise 一致：工具内部就把失败变结构化结果（最佳）
+最佳实践两层：**工具内部**把"找不到/异常"变成**干净的结构化结果**（`{"products": []}`，见 B#5/s4_02b「内部错误不外溢」）——模型看到清晰观察；**ToolNode 的 handle_tool_errors** 只当**兜底**（防漏网异常崩图）。前者信息好、后者防意外。
+
+> （子图 + 循环时 recursion_limit 的嵌套语义本版本未实测，真用到再验证——别凭这句下结论。）
 
 ---
 

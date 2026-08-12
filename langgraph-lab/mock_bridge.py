@@ -27,7 +27,19 @@ CANNED_INPUT: dict[str, dict] = {
     "assess": {"dimensions": {"experience": 4, "loss_tolerance": 3, "income_stability": 5,
                               "investment_horizon": 3, "volatility_tolerance": 4}},
     "recommend": {"recommended_code": "P-R4", "reason": "（mock）候选中与该等级最匹配的一款。"},
+    "search_products": {"risk_level": "C4"},   # lg_05 ReAct agent 用
 }
+
+
+def _has_tool_result(messages: list[dict]) -> bool:
+    """请求的 messages 里有没有 tool_result 块（= 工具已执行、结果回喂回来了）。
+    有 → 说明是 ReAct loop 的第二轮，该收尾了（返回纯文本 end_turn）。"""
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, list):
+            if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+                return True
+    return False
 
 
 class MessagesRequest(BaseModel):
@@ -41,27 +53,20 @@ class MessagesRequest(BaseModel):
 
 @app.post("/v1/messages")
 async def create_message(req: MessagesRequest):
-    # 挑第一个工具，回一个 tool_use 块（bridge 约定：模型总以工具形式作答）
-    tool_name = req.tools[0]["name"] if req.tools else "unknown"
-    tool_input = CANNED_INPUT.get(tool_name, {})
+    base = {"id": f"msg_mock_{uuid.uuid4().hex[:8]}", "type": "message", "role": "assistant",
+            "model": req.model, "stop_sequence": None,
+            "usage": {"input_tokens": 10, "output_tokens": 10}}
 
-    # ★ 这就是"合法的 Anthropic 非流式 Message 响应结构"——ChatAnthropic 期望的形状
-    message = {
-        "id": f"msg_mock_{uuid.uuid4().hex[:8]}",
-        "type": "message",
-        "role": "assistant",
-        "model": req.model,
-        "content": [{
-            "type": "tool_use",
-            "id": f"toolu_mock_{uuid.uuid4().hex[:8]}",
-            "name": tool_name,
-            "input": tool_input,
-        }],
-        "stop_reason": "tool_use",
-        "stop_sequence": None,
-        "usage": {"input_tokens": 10, "output_tokens": 10},
-    }
-    return JSONResponse(message)
+    # ★ ReAct loop 支持：若 messages 里已有 tool_result（工具执行过了）→ 返回纯文本收尾（end_turn），
+    #   让 create_react_agent 的循环自然停；否则返回 tool_use（第一轮，让它去调工具）。
+    if _has_tool_result(req.messages):
+        return JSONResponse({**base, "stop_reason": "end_turn",
+                             "content": [{"type": "text", "text": "（mock）已根据查询结果完成，推荐 P-R4 成长精选混合。"}]})
+
+    tool_name = req.tools[0]["name"] if req.tools else "unknown"
+    return JSONResponse({**base, "stop_reason": "tool_use",
+                         "content": [{"type": "tool_use", "id": f"toolu_mock_{uuid.uuid4().hex[:8]}",
+                                      "name": tool_name, "input": CANNED_INPUT.get(tool_name, {})}]})
 
 
 @app.get("/healthz")
