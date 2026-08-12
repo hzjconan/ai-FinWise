@@ -14,6 +14,7 @@
 - [核心抽象：State / Node / Edge](#核心抽象state--node--edge)
 - [手写 supervisor ↔ LangGraph 对照](#手写-supervisor--langgraph-对照)
 - [State 设计：契约不是垃圾桶（长任务怎么不失控）](#state-设计契约不是垃圾桶长任务怎么不失控)
+- [可视化：draw_mermaid / 条件边要声明才画得出](#可视化draw_mermaid--条件边要声明才画得出)
 - [错误处理：节点抛异常 = 整图崩](#错误处理节点抛异常--整图崩)
 - [核心认知：框架不是魔法](#核心认知框架不是魔法)
 
@@ -120,6 +121,38 @@ result = app.invoke({"customer_desc": desc})   # 跑图，传入初始 State
 **反直觉的点**：State 其实比手写"散变量"**更**可维护——手写时 risk_level/products 是散落在函数里的局部变量、靠读代码追数据流；State 把跨节点数据收进**一个声明式、带类型的 TypedDict**，一览无余还能类型检查。
 
 一句话：**State 是你设计的"跨节点数据契约"，不是自动堆东西的垃圾桶。** 重了就靠 标注归属 / 按域嵌套 / input-output schema / subgraph 拆分。
+
+---
+
+## 可视化：draw_mermaid / 条件边要声明才画得出
+
+图能画出来是 LangGraph 相对手写编排的一大好处（手写只能读代码想象流程）。
+
+**核心方法**：`app.get_graph()` 拿到可绘制图对象，再调画法：
+```python
+g = app.get_graph()
+g.draw_mermaid()      # → Mermaid 文本（零依赖、永远可用；贴到 mermaid.live / GitHub markdown 渲染）
+g.draw_ascii()        # → 终端 ASCII 图（需 pip install grandalf）
+g.draw_mermaid_png()  # → PNG 图片（需联网调 mermaid.ink，或本地 graphviz）
+```
+> 贴 mermaid 时**第一行 `graph TD;` 不能省**（否则 mermaid.live 报 "No diagram type detected"）；`draw_mermaid()` 的完整输出已带它，整段贴即可。实线 `-->`=普通边，虚线 `-.->`=条件边。
+
+**机制（一点不神秘，能看穿）**：`draw_mermaid()` 不运行图、不调 LLM，就是**把图的"节点+边清单"翻译成文本**：
+```
+get_graph().edges 里每条边：             draw_mermaid 翻译：
+ __start__→assess  conditional=False  →  __start__ --> assess;
+ retrieve→recommend conditional=True  →  retrieve -.-> recommend;   （条件边→虚线）
+```
+链路：**声明分支 → get_graph() 把分支补进 edges 清单 → draw_mermaid 翻译成文本 → mermaid.live 画成图**。每层只做一件事。（你也能自己遍历 `g.edges` 导出任意格式。）
+
+**⚠️ 条件边默认画不出——因为它的目标是运行时才知道的，静态不可见**。要画出条件分支，必须**声明**目标（官方两方案）：
+1. **路由函数加 `Literal` 返回标注**（推荐，最轻）：`def route(s) -> Literal["recommend", "__end__"]:` —— LangGraph 读标注把分支补进 edges 清单。注意 `END` 的字面值是 `"__end__"`。
+2. **`add_conditional_edges` 传 path_map**：`add_conditional_edges("retrieve", route, {"recommend":"recommend", END:END})`。
+（用 `Command` 路由时，返回标注 `Command[Literal[...]]` 是**强制**的，否则渲染不出——见官方文档。）
+
+**为什么推荐 Literal**：一行标注三重收益——① 图画得对；② 类型检查（路由只会返回这几个值、写错节点名被抓）；③ 自文档。不只是为画图，是纯赚的好习惯，所有路由函数都建议加。
+
+**更本质**：任何"静态可视化"都只能画静态可知的东西；运行时才决定的分支必须以某种形式声明（标注/映射表）工具才画得出——不限于 LangGraph。
 
 ---
 

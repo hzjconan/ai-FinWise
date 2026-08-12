@@ -19,7 +19,7 @@ s6_02 你【手写】了 supervisor：await assess → retrieve → if 空 → a
 from __future__ import annotations
 
 import os
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 import httpx
 from anthropic import Anthropic
@@ -125,9 +125,13 @@ def recommend_node(state: State) -> dict:
 
 # ========================= 你的 TODO：build_graph（连边）=========================
 
-def route_after_retrieve(state: State) -> str:
+def route_after_retrieve(state: State) -> Literal["recommend", "__end__"]:
     """条件边的路由函数：候选为空 → 直接结束（END）；否则去 recommend 节点。
-    （对应 s6_02 手写的 `if not products: return 暂无`。）返回下一个节点名或 END。"""
+    （对应 s6_02 手写的 `if not products: return 暂无`。）返回下一个节点名或 END。
+
+    ★ 返回类型标注 Literal["recommend", "__end__"]：LangGraph 官方推荐——它读这个标注，
+      才能把条件分支画进图里（虚线）。不标注则画不出（分支运行时才知、静态不可见）。
+      注意 END 的字面值是 "__end__"。"""
     return END if not state["products"] else "recommend"
 
 
