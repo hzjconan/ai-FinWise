@@ -29,6 +29,7 @@
 - [Eval：给不确定输出打分（Hit@K / MRR / 召回·精确 / golden set）](#eval给不确定输出打分hitk--mrr--召回精确--golden-set)
 - [Agent 框架：本质是"手写 loop 的封装"](#agent-框架本质是手写-loop-的封装)
 - [Tracing（可观测性）：看进一次运行内部](#tracing可观测性看进一次运行内部)
+- [Harness Engineering：给模型造脚手架（统领全局）](#harness-engineering给模型造脚手架统领全局)
 - [常见追问](#常见追问)
 
 ---
@@ -549,6 +550,37 @@ trace: supervisor("我炒股5年…")                    ← 一次完整运行
 | **tracing** | 过程里**发生了什么**（可见性：哪步慢/贵/错） |
 
 eval 告诉你"变差了"，tracing 告诉你"**为什么**变差、卡在哪步"。生产里两个都要。（阶段六 lg_06 会把手搓的 ToolLoggingLLM 换成 LangSmith，看 LangGraph 图每步轨迹——补上阶段五留的可观测性坑。）
+
+---
+
+## Harness Engineering：给模型造脚手架（统领全局）
+
+> 不是严格教科书术语，是 agent 工程圈（尤其 Anthropic / Claude Code 语境）的常用说法，但含义清晰。
+
+把一个 AI 系统拆两半：
+- **model（模型）**：吃 token 吐 token 的"引擎"，你基本不训练/不改，拿来就用。
+- **harness（脚手架/挽具）**：**把引擎套起来、让它真正干活的一切外围代码**——agent loop、工具定义与执行、上下文/prompt 构造、记忆/状态、重试/容错、多 agent 编排、防幻觉校验、输出解析……
+
+**harness engineering = 设计打磨这套脚手架的工程**。名字来自"挽具"：马（模型）力气大，但要靠挽具才能拉车干活。
+
+**核心洞察——你的杠杆几乎全在 harness 上**：模型是给定的、你改不了，所以一个 agent 产品好不好**大部分取决于 harness 而非模型**。同一个 Claude，套烂 harness vs 好 harness 天差地别。（Claude Code 本身就是一个 harness——同一模型，能力很大程度来自它的 harness 工程。）
+
+**这个概念统一了本文档几乎所有零散知识**——它们不是一堆技巧，是"造 harness"这一件事的不同侧面：
+
+| 学过的 | harness 的哪一块 |
+|---|---|
+| 手写 agent loop（B#3–B#7） | harness 的心脏（loop） |
+| 工具定义 + 执行器 | 工具层 |
+| 上下文/messages 构造 | 上下文工程（context engineering） |
+| 重试/容错 | 健壮性 |
+| grounding 硬校验 / 定级去模型化 | 护栏（guardrails） |
+| RAG 检索 + chunking | 上下文供给 |
+| supervisor 多 agent / LangGraph | 编排 |
+| eval / tracing | 衡量与观测"模型+harness"这套系统 |
+
+**框架的定位**：tool_runner / LangGraph 本质是 **harness 框架**——给你现成的 harness 组件（loop、编排）。你**亲手造过 harness**，才能看穿它们（见"Agent 框架"节）。
+
+一句话：**harness engineering = 工程模型外围那套脚手架，把"一个语言模型"变成"一个能干活的 agent 系统"。模型给定，harness 才是你真正施力、决定产品质量的地方——这正是整趟学习在做的事。**
 
 ---
 
