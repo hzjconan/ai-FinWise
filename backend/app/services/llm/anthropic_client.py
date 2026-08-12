@@ -13,9 +13,16 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, AuthenticationError, BadRequestError, PermissionDeniedError
 
+from app.services.llm.base import NonRetryableLLMError
 from app.services.llm.events import LLMEvent, TextDelta, ToolResult
+
+# L1：LLM 调用超时（秒）。挂起的调用不会无限等——超时抛异常、计入可重试。
+DEFAULT_TIMEOUT_SECONDS = 30.0
+
+# R1：这些 Anthropic 异常是【确定性错误】，重试也一样错 → 归为不可重试。
+_NON_RETRYABLE = (BadRequestError, AuthenticationError, PermissionDeniedError)
 
 
 class AnthropicLLMClient:
@@ -25,13 +32,28 @@ class AnthropicLLMClient:
         *,
         model: str = "claude-haiku-4-5-20251001",
         max_tokens: int = 1024,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ):
-        # 允许注入客户端以便测试；生产走默认构造（读环境变量）
-        self._client = client or AsyncAnthropic()
+        # 允许注入客户端以便测试；生产走默认构造（读环境变量）。L1：默认带超时。
+        self._client = client or AsyncAnthropic(timeout=timeout)
         self._model = model
         self._max_tokens = max_tokens
 
     async def stream_chat(
+        self,
+        *,
+        system: str,
+        messages: list[dict],
+        tools: list[dict],
+    ) -> AsyncIterator[LLMEvent]:
+        try:
+            async for ev in self._stream(system=system, messages=messages, tools=tools):
+                yield ev
+        except _NON_RETRYABLE as e:
+            # R1：确定性错误 → 包成 provider 无关的不可重试标记，让上层立即抛不重试
+            raise NonRetryableLLMError(str(e)) from e
+
+    async def _stream(
         self,
         *,
         system: str,

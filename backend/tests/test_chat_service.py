@@ -350,8 +350,9 @@ def test_handle_user_message_llm_error_yields_error_event_and_does_not_persist(d
     assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 0
 
 
-def test_handle_user_message_retries_once_on_exception(db):
-    """第一次 raise，第二次正常 → 最终成功。"""
+def test_handle_user_message_retries_once_on_exception(db, monkeypatch):
+    """第一次 raise（可重试），退避后第二次正常 → 最终成功。"""
+    monkeypatch.setattr(chat_service, "RETRY_BASE_DELAY", 0)   # R1：测试里免掉真退避 sleep
     customer = _make_customer(db)
     session = chat_service.create_session(db, customer.id)
 
@@ -364,26 +365,41 @@ def test_handle_user_message_retries_once_on_exception(db):
     completed = [e for e in events if e["event"] == "completed"]
     assert len(completed) == 1
     assert completed[0]["data"]["phase"] == "asking"
-    # 两次调用都被记录
-    assert len(llm.calls) == 2
+    assert len(llm.calls) == 2   # 失败1次 + 成功1次
 
 
-def test_handle_user_message_two_failures_yield_error(db):
+def test_handle_user_message_exhausts_retries_yield_error(db, monkeypatch):
+    """可重试错误连续失败，耗尽 MAX_LLM_ATTEMPTS 次后 → error 事件。"""
+    monkeypatch.setattr(chat_service, "RETRY_BASE_DELAY", 0)
+
+    def boom():
+        raise RuntimeError("transient-fail")
+
+    llm = MockLLMClient([boom] * chat_service.MAX_LLM_ATTEMPTS)   # 每次都失败
     customer = _make_customer(db)
     session = chat_service.create_session(db, customer.id)
-
-    def boom1():
-        raise RuntimeError("fail-1")
-
-    def boom2():
-        raise RuntimeError("fail-2")
-
-    llm = MockLLMClient([boom1, boom2])
     events = _run(_collect(chat_service.handle_user_message(db, session, "hi", llm)))
     assert len(events) == 1
     assert events[0]["event"] == "error"
     assert events[0]["data"]["code"] == "llm_error"
-    assert "fail-2" in events[0]["data"]["message"]
+    assert "transient-fail" in events[0]["data"]["message"]
+    assert len(llm.calls) == chat_service.MAX_LLM_ATTEMPTS   # 重试到上限
+
+
+def test_handle_user_message_non_retryable_not_retried(db, monkeypatch):
+    """R1：NonRetryableLLMError（确定性错误，如 400）→ 立即抛、【不重试】。"""
+    monkeypatch.setattr(chat_service, "RETRY_BASE_DELAY", 0)
+
+    def boom():
+        raise chat_service.NonRetryableLLMError("400 bad request")
+
+    llm = MockLLMClient([boom, boom, boom])   # 脚本里放多个，验证只消费 1 次
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    events = _run(_collect(chat_service.handle_user_message(db, session, "hi", llm)))
+    assert events[-1]["event"] == "error"
+    assert events[-1]["data"]["code"] == "llm_error"
+    assert len(llm.calls) == 1   # ★ 只调 1 次，没重试
 
 
 def test_handle_user_message_missing_tool_result_yields_error(db):

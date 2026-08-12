@@ -13,6 +13,7 @@
 - conclude 在单个事务内写 assessment + 更新 session.status + 关联 chat_session_id
 """
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from decimal import Decimal
@@ -25,7 +26,7 @@ from app.models.assessment import Assessment
 from app.models.chat import ChatMessage, ChatSession
 from app.models.customer import Customer
 from app.models.product import Product
-from app.services.llm.base import LLMClient
+from app.services.llm.base import LLMClient, NonRetryableLLMError
 from app.services.llm.events import LLMError, TextDelta, ToolResult
 from app.services.llm.prompts import load_system_prompt, load_dimensions
 from app.services.risk_calculator import MATCH_RULES, PREFERENCE_LABELS, calculate_risk_preference
@@ -211,7 +212,11 @@ def build_api_messages(session: ChatSession) -> list[dict]:
     return result
 
 
-# ---------- LLM 调用（含自动重试 1 次） ----------
+# ---------- LLM 调用（可重试：指数退避）----------
+
+MAX_LLM_ATTEMPTS = 3        # 总尝试次数（含首次）
+RETRY_BASE_DELAY = 0.5      # 指数退避基数：0.5s、1s、2s…（R1）
+
 
 async def _call_llm_with_retry(
     llm: LLMClient,
@@ -220,16 +225,17 @@ async def _call_llm_with_retry(
     messages: list[dict],
     tools: list[dict],
 ) -> tuple[str, ToolResult | None, LLMError | None, list[TextDelta]]:
-    """调用 LLM 并收集事件。失败重试一次。
+    """调用 LLM 并收集事件。
 
-    返回 (text, tool_result, llm_error, deltas)：
-    - text: 累积的 content 文本
-    - tool_result: 模型最终的 tool 调用；若无则 None（视作错误）
-    - llm_error: 若 provider 明确上报 LLMError；否则 None
-    - deltas: 原始 TextDelta 事件列表（用于 router 逐条转成 SSE）
+    R1 重试策略（provider 无关）：
+    - NonRetryableLLMError（确定性错误，如 400/认证）→ 立即抛，【不重试】（重试也一样错）；
+    - 其余异常（网络/5xx/超时/限流）→ 可重试，【指数退避】后再试，最多 MAX_LLM_ATTEMPTS 次。
+    （"可不可重试"的 provider 特有判断下沉在 AnthropicLLMClient，这里只认抽象标记。）
+
+    返回 (text, tool_result, llm_error, deltas)。
     """
     last_exc: Exception | None = None
-    for attempt in range(2):
+    for attempt in range(MAX_LLM_ATTEMPTS):
         try:
             text_parts: list[str] = []
             deltas: list[TextDelta] = []
@@ -244,10 +250,12 @@ async def _call_llm_with_retry(
                 elif isinstance(event, LLMError):
                     llm_error = event
             return "".join(text_parts), tool_result, llm_error, deltas
-        except Exception as e:  # noqa: BLE001
+        except NonRetryableLLMError:
+            raise                                    # 确定性错误：不重试，直接抛
+        except Exception as e:  # noqa: BLE001        # 可重试错误：退避后再试
             last_exc = e
-            continue
-    # 两次都抛异常
+            if attempt < MAX_LLM_ATTEMPTS - 1:
+                await asyncio.sleep(RETRY_BASE_DELAY * (2 ** attempt))
     raise last_exc  # type: ignore[misc]
 
 
