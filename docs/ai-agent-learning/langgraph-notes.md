@@ -102,6 +102,17 @@ result = app.invoke({"customer_desc": desc})   # 跑图，传入初始 State
 
 ---
 
+## LLM 从哪来（学习环境的取舍）
+
+节点是普通 Python 函数，里面**怎么调 LLM 都行**。本学习环境的约束与选择：
+
+- **基础篇（lg_01/02/03）用裸 `call_tool`**（backend/scratch/_bridge 的 anthropic SDK + 本地 bridge）——**已验证能跑**（s6_02 就是这么做的），零改动、能用真 LLM。
+- **`ChatAnthropic`（langchain）走不通本地 bridge**：验证脚本 `langgraph-lab/verify_chatanthropic_bridge.py` 实测——请求能发出（`anthropic_api_url` 指向 bridge + `NO_PROXY=localhost` 绕本机代理），但 `_format_output` 里 `data.model_dump()` 崩：`'str' object has no attribute 'model_dump'`。**和 tool_runner（`messages.parse` 崩在 `'str'...content`）同一病根**：bridge 的 `/v1/messages` 返回的**响应体结构不够标准**（裸 SDK 能容忍，langchain/tool_runner 的严格解析层吃不下）。**不是端点缺失，是响应格式不达标。**
+- **教训**：别只查"端点在不在"就断言能用——要真跑。（这次先验证才挖出真相。）
+- **进阶篇（lg_04 ChatAnthropic）计划**：另做一个**教学用 bridge**，只模拟"合法的响应结构"（不必真接 claude CLI，返回符合 Anthropic Message/SSE 结构的假数据即可满足教学）——干净解决 langchain/tool_runner 兼容，且不动现有 bridge。或到时用真 ANTHROPIC_API_KEY。
+
+---
+
 ## 核心认知：框架不是魔法
 
 和学 `tool_runner`（s6_01）同一条：**LangGraph 就是把你手写的"节点+边+状态"结构化成一张图**。你在 s6_02 亲手写过 supervisor，所以现在看这些抽象，**每一个都知道对应你哪行代码**——`add_edge` 就是那行 `await agent2(...)`、条件边就是那个 `if not products`。
