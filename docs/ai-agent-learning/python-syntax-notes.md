@@ -18,6 +18,7 @@
 - [推导式 / any / all（对应 JS filter/map/some/every）](#推导式--any--all对应-js-filtermapsomeevery)
 - [解包必须数量精确](#解包必须数量精确)
 - [Literal 类型标注（vs Enum）](#literal-类型标注vs-enum)
+- [解包操作符 * 和 **（展开 list / dict）](#解包操作符--和-展开-list--dict)
 
 ---
 
@@ -184,3 +185,39 @@ def set_mode(m: Mode): ...；               set_mode(Mode.R)       # 传枚举�
 
 **怎么选**：值本来就是简单字符串/数字、只想约束取值、不想多定义类 → **Literal**（轻）。需要运行时具名常量、迭代、带方法/行为、强类型对象 → **Enum**（重但强）。
 （lg_02 路由函数返回节点名字符串，LangGraph 期望字符串 → 用 Literal 最自然；用 Enum 还得 `.value` 转回字符串反而绕。）
+
+---
+
+## 解包操作符 `*` 和 `**`（展开 list / dict）
+
+`*` 展开**可迭代对象**（list/tuple），`**` 展开**字典**。常见于两处：**构造新容器**、**函数调用传参**。
+
+**① 字典字面量里 `**`：把一个 dict 的键值对"摊进"新 dict**（s4_05 chunk 的 metadata 就这么拼）：
+```python
+doc_meta = {"product_code": "P-TECH", "risk_level": "C5"}
+row = {**doc_meta, "chunk_index": 0, "page": 3}
+# 等价于：
+#   row = dict(doc_meta)     # 复制 doc_meta 所有字段（浅拷贝，生成新 dict）
+#   row["chunk_index"] = 0
+#   row["page"] = 3
+# → {"product_code":"P-TECH", "risk_level":"C5", "chunk_index":0, "page":3}
+```
+两个要点：
+- **生成一个新 dict**（浅拷贝顶层）——循环里每次 `{**doc_meta, ...}` 都是**独立对象**，20 个 chunk 不会共享同一个 metadata（否则改一个全变，是经典 footgun，呼应 [[可变对象当默认参数footgun]]）。
+- **后写的键覆盖先写的**——`{**doc_meta, "risk_level": "C3"}` 会把继承来的 `risk_level` 改成 C3。
+
+**② list 字面量里 `*`：把一个 list 展开进新 list**：
+```python
+a = [1, 2]
+b = [0, *a, 3]        # [0, 1, 2, 3]
+merged = [*list1, *list2]   # 拼接两个 list
+```
+
+**③ 函数调用时 `*args` / `**kwargs`：把序列/字典拆成实参**：
+```python
+def f(x, y, z): ...
+args = [1, 2, 3];      f(*args)              # 等价 f(1, 2, 3)
+kw = {"x":1,"y":2,"z":3}; f(**kw)            # 等价 f(x=1, y=2, z=3)
+```
+
+**一句话记**：`*` 拆**位置**（list/tuple），`**` 拆**键值**（dict）；在字面量里是"摊开合并"，在调用里是"拆成实参"。（这和函数定义里的 `def f(*args, **kwargs)` 是同一符号的"反向"——定义时是"收集"，调用/字面量时是"展开"。）
