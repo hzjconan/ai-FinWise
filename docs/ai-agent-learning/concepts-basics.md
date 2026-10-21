@@ -32,6 +32,7 @@
 - [Agent 框架：本质是"手写 loop 的封装"](#agent-框架本质是手写-loop-的封装)
 - [Tracing（可观测性）：看进一次运行内部](#tracing可观测性看进一次运行内部)
 - [Harness Engineering：给模型造脚手架（统领全局）](#harness-engineering给模型造脚手架统领全局)
+- [混合检索：BM25 / RRF / 重排 / Query 改写（L01）](#混合检索bm25--rrf--重排--query-改写l01)
 - [常见追问](#常见追问)
 
 ---
@@ -776,6 +777,23 @@ eval 告诉你"变差了"，tracing 告诉你"**为什么**变差、卡在哪步
 **框架的定位**：tool_runner / LangGraph 本质是 **harness 框架**——给你现成的 harness 组件（loop、编排）。你**亲手造过 harness**，才能看穿它们（见"Agent 框架"节）。
 
 一句话：**harness engineering = 工程模型外围那套脚手架，把"一个语言模型"变成"一个能干活的 agent 系统"。模型给定，harness 才是你真正施力、决定产品质量的地方——这正是整趟学习在做的事。**
+
+---
+
+## 混合检索：BM25 / RRF / 重排 / Query 改写（L01）
+
+> 详细推导、例子、实验见 `lessons/L01-hybrid-retrieval.md`；代码 `backend/scratch/s4_06_hybrid_rerank.py`。
+
+- **BM25（Best Matching 25，Okapi BM25）**：TF-IDF 改良版，关键词检索事实标准（Elasticsearch / Lucene 默认）。修三处：① **TF 饱和**（k1，默认 1.2，封顶 k1+1）② **长度归一化**（b，默认 0.75，比平均长就打折）③ **IDF 平滑**（永远 > 0）。打分 = query 每个词得分**相加**，不算余弦。
+- **倒排索引（Inverted Index）**：词 → 包含它的文档列表（posting list）。查询只碰含 query 词的文档，避免全表扫（向量那边靠 ANN/HNSW）。**存原始计数**（tf、长度、N、总长度；df = 列表长度），IDF/avgdl 查询时现算 → 增删文档只改计数器。
+- **为什么混合（Hybrid Retrieval）**：embedding 擅长"意思近、字面不同"；BM25 擅长"字面精确"（代码、编号、数字、新词）。e5 对数字**不是盲而是区分度低**（2040 vs 2035 只差 0.015）；BM25 区分度高但**依赖分词**（bigram 把"稳盈A"拆散导致打平）。
+- **两路分数不能直接加**：量纲不同、BM25 无上界 → 用 **RRF（Reciprocal Rank Fusion）= Σ 1/(k + 名次)**，k 默认 60。只用名次 → 无量纲问题、免调参；没召回记 0 → **偏好多路共识**。k 越大越看重共识。备选：min-max 归一化 + 加权。
+- **混合能超过最好的单路**：两路错误不重叠，一路排低的另一路排高会被"捞"上来（s4_06：P-BOND 向量第 4 → 融合第 1）；一路为空退化成另一路，**有益无害**。
+- **重排**：召回负责"找全"（多取 30~50），重排负责"排准"（给 LLM 5~10）。**Bi-Encoder**（双塔，query/文档分开编码，文档向量可预算 → 快，用于召回）vs **Cross-Encoder**（query+文档拼一起过模型 → 准但每对现算，只用于少量候选；如 bge-reranker）。信号：**Hit@K 高、MRR 低 → 加重排；Hit@K 低 → 改召回**。生产里重排只取**候选**文本（召回时带回或按 ID 批量取），不加载全库。
+- **Query 改写**：补全成独立问题（多轮丢上下文）、多 query 扩展（各检索再 RRF）、**HyDE**（Hypothetical Document Embeddings，先写假答案拿去检索）、拆分。风险：语义漂移、丢精确词 → **原 query 一起检索**最稳，再加代码硬校验。agent 调检索工具自己填参数 = 天然改写。
+- **eval 新教训**：测精确匹配要有**困难负样本（Hard Negative）**；**名次指标看不出"险胜"，要看分差**；题太简单会**天花板效应**（全 1.00 分不出好坏）；7 篇 6 题下"重排提升"只来自 1 题 → 数据不足以下结论。
+- **归一化向量**：cos = 点积；欧氏距离² = 2 − 2cos → 三者排名一致；Chroma `l2` = 2 × `cosine` 距离。e5 自带 Normalize 层。
+- **RAG"答非所问"排查**：固定一层只换一层、下游往上游：trace 看 prompt 里的资料（生成 vs 检索）→ 漏斗每层候选（召回 vs 重排/截断）→ 读 chunk 原文（截断/丢主语/太大/表格）→ 手造理想 query（query vs embedding；先排除不在索引、被过滤）。
 
 ---
 

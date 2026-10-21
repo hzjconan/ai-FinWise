@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 .venv/
+.venv.*/
 *.db
 
 # Node
@@ -18,3 +19,7 @@ dist/
 
 # Env
 .env
+
+# Office lock files
+.~lock.*#
+~$*
