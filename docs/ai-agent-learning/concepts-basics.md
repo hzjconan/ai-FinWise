@@ -33,6 +33,7 @@
 - [Tracing（可观测性）：看进一次运行内部](#tracing可观测性看进一次运行内部)
 - [Harness Engineering：给模型造脚手架（统领全局）](#harness-engineering给模型造脚手架统领全局)
 - [混合检索：BM25 / RRF / 重排 / Query 改写（L01）](#混合检索bm25--rrf--重排--query-改写l01)
+- [RAG 评估：Recall@K / nDCG / RAGAS / LLM-as-judge（L02）](#rag-评估recallk--ndcg--ragas--llm-as-judgel02)
 - [常见追问](#常见追问)
 
 ---
@@ -794,6 +795,23 @@ eval 告诉你"变差了"，tracing 告诉你"**为什么**变差、卡在哪步
 - **eval 新教训**：测精确匹配要有**困难负样本（Hard Negative）**；**名次指标看不出"险胜"，要看分差**；题太简单会**天花板效应**（全 1.00 分不出好坏）；7 篇 6 题下"重排提升"只来自 1 题 → 数据不足以下结论。
 - **归一化向量**：cos = 点积；欧氏距离² = 2 − 2cos → 三者排名一致；Chroma `l2` = 2 × `cosine` 距离。e5 自带 Normalize 层。
 - **RAG"答非所问"排查**：固定一层只换一层、下游往上游：trace 看 prompt 里的资料（生成 vs 检索）→ 漏斗每层候选（召回 vs 重排/截断）→ 读 chunk 原文（截断/丢主语/太大/表格）→ 手造理想 query（query vs embedding；先排除不在索引、被过滤）。
+
+---
+
+## RAG 评估：Recall@K / nDCG / RAGAS / LLM-as-judge（L02）
+
+> 详细推导、例子、实验见 `lessons/L02-rag-evaluation.md`；代码 `backend/scratch/s5_03_faithfulness_judge.py`。
+
+- **检索满分 ≠ 回答好**：资料全对，生成仍可能编造、张冠李戴、答非所问、挑错、拒答失当 → 必须有**生成侧指标**。
+- **检索侧补全**：多个相关文档时 golden set 要**列全**，用 **Recall@K**（相关的找到几成）代替 Hit@K（至少一个）；**Precision@K** 看噪声；**nDCG**（Normalized Discounted Cumulative Gain）= Σ rel_i / log₂(i+1) 再除以理想排序的值，**所有相关文档的名次都算、越靠后折扣越多**，支持分级相关度。MRR 只看第一个相关文档。
+- **RAGAS**（Retrieval-Augmented Generation Assessment）：question / contexts / answer（+ reference）**两两比较** → Context Precision、Context Recall（检索侧），**Faithfulness**（回答每句在资料里有没有依据）、**Answer Relevancy**（有没有跑题，惩罚敷衍拒答）（生成侧）。**盲区：不判断"答得对不对"** → 选错产品靠 Answer Correctness（比标准答案）或业务规则硬校验。
+- **Faithfulness = 有依据陈述 ÷ 全部陈述**：受"怎么拆""判多严"影响，适合同一评审方式下比较。衡量"**有没有根据**"不是"对不对"——资料外的内容哪怕是事实也判无依据（那是幻觉的入口）。
+- **幻觉率**按**回答**统计（一句错就算错），金融场景当红线；Faithfulness 按陈述平均，用于诊断。**关键字段（收益率、风险等级、期限）用代码硬校验**，且要精确匹配（"3"会被"30"的子串骗过）。
+- **"说错"和"漏说"是两类问题**：省略风险提示 Faithfulness 抓不到，要单独做"风险提示完整性"检查。
+- **LLM-as-judge**：偏差有位置、长度、**自我偏好**（来自文风：自家文字概率高更顺、同家族审美一致，不靠认出标签）、宽松 → 交换顺序、二元判断、换家族、给档位例子。输出 **reason 在前 verdict 在后**，verdict 用 enum 限死，异常时 **fail-closed**。**校验评审 = 人工标 30~100 条（含难判的）算一致率**，重点看幻觉召回；留一部分没见过的样本做最终测试；多跑几次看稳定性。📛 Cohen's Kappa = 扣除碰巧一致后的一致率。
+- **Embedding 选型**：MTEB / C-MTEB 看**检索 nDCG@10**，只用来缩小候选；用自己的 golden set 实测，并看维度、速度、最大长度、部署（数据能否出去）、许可证。**换模型要全量重编码**（向量空间不通用），索引标版本、后台重建、保留回滚。
+- **agent 评估四层**：结果（完成率）/ 过程（工具选择与参数、步数、重复调用）/ 安全（负向、注入）/ 线上（干预率）。离线模拟用户的完成率会**虚高**。**线上闭环**：👎 → bad case → 归因 → 修复 → **进 golden set**（防回归、贴近真实分布）→ 回归 eval。
+- **降低幻觉三层**：检索（给对资料）→ 生成（限制自由度：grounding、强制引用、关键值由代码算）→ 验证 + 兜底（硬校验、评审，拦下返回安全话术）。线上：硬校验全量同步，LLM 评审只对高风险同步，其余抽样异步。
 
 ---
 
