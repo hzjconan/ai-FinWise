@@ -38,6 +38,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -127,6 +128,50 @@ def make_http_client(headers: dict[str, str], status: StatusRecorder | None = No
 def mcp_client(url: str, http: httpx2.AsyncClient) -> Client:
     """用共享的 HTTP 客户端开一个 MCP 会话。SDK 不会关闭我们传进去的 http（实测源码：client_provided 时不 aclose）。"""
     return Client(streamable_http_client(url, http_client=http))
+
+
+# ========================= TODO 7a：固定工具描述的指纹（防跟踪变更）=========================
+# 第 7 步：审核通过时，记下每个工具"名字 + 描述 + 参数 schema"的哈希（写进 mcp_config.yaml 的 pinned_tools）；
+# 之后每次拿到工具列表都重新算一遍，对不上的工具一律不交给模型——server 偷偷改了描述（rug pull）也能拦下。
+
+def tool_fingerprint(tool) -> str:
+    """TODO 7a-1：返回一个工具的指纹（sha256 十六进制字符串）。
+
+    参与计算的内容：{"name": tool.name, "description": tool.description or "", "input_schema": tool.input_schema}
+    做法：先把这个 dict 转成【规范化】的 JSON 字符串，再算 sha256：
+        json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        hashlib.sha256(文本.encode("utf-8")).hexdigest()
+    想一想：为什么要 sort_keys=True？（提示：两个内容相同的 dict，键的顺序可以不同）
+    """
+    d = {"name": tool.name, "description": tool.description or "", "input_schema": tool.input_schema}
+    canonical = json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def filter_pinned_tools(mcp_tools, pinned: dict[str, str]) -> tuple[list, list[tuple[str, str]]]:
+    """TODO 7a-2：只保留指纹和配置一致的工具。
+
+    参数：
+      mcp_tools —— tools/list 返回的工具列表
+      pinned    —— 配置里的 {工具名: 审核时记下的指纹}
+    返回：(保留的工具列表, 被拒绝的 [(工具名, 原因), ...])
+    规则：
+      - 工具名不在 pinned 里 → 拒绝，原因 "未在白名单中"（server 新加的工具，没人审核过）
+      - 在 pinned 里但指纹不一致 → 拒绝，原因 "描述或参数已变化"
+      - 指纹一致 → 保留
+    """
+    kept, rejected = [], []
+    for tool in mcp_tools:
+        name = tool.name
+        if name not in pinned:
+            rejected.append((name, "未在白名单中"))
+        elif tool_fingerprint(tool) != pinned[name]:
+            rejected.append((name, "描述或参数已变化"))
+        else:
+            kept.append(tool)
+    return kept, rejected
+
+# =============================================================================
 
 
 # ========================= TODO 5e-3b：工具定义格式转换 =========================
@@ -372,6 +417,16 @@ class McpHost:
         except HostUnavailable as exc:
             self._mark_unavailable(str(exc))
             return False
+        pinned = self.config["mcp_servers"][self.server_name].get("pinned_tools")
+        if pinned is not None:                                                          # 7a：只用审核过的工具
+            mcp_tools, rejected = filter_pinned_tools(mcp_tools, pinned)
+            for name, reason in rejected:
+                log.warning("⚠️ 拒绝工具 %s：%s（可能是 server 改了描述，需重新审核）", name, reason)
+            if not mcp_tools:
+                self._mark_unavailable("没有通过指纹校验的工具")
+                return False
+        else:
+            log.warning("配置里没有 pinned_tools：不校验工具描述（仅限本地调试）")
         self.tools = mcp_tools_to_anthropic(mcp_tools)                                  # ④ 缓存
         self.available, self.unavailable_reason = True, ""
         log.info("已连接 %s，缓存工具：%s", self.server_name, [t["name"] for t in self.tools])
@@ -392,6 +447,35 @@ class McpHost:
         self._last_attempt = time.monotonic()
 
 
+async def print_pins() -> None:
+    """审核工具时用：连上 server，打印每个工具的【完整描述和参数】以及指纹，供人工审核后写进 pinned_tools。
+    运行：FINWISE_MCP_TOKEN=... .venv/bin/python online_host.py --pin
+    ⚠️ 只在你【已经读完】下面打印的完整描述和参数、确认没有可疑指令之后，才把指纹写进配置。"""
+    cfg = load_config()
+    for name in cfg["mcp_servers"]:
+        try:
+            url, headers, connect = server_settings(cfg, name)
+            http = make_http_client(headers)
+            try:
+                tools = await list_tools_with_retry(url, http, connect)
+            finally:
+                await http.aclose()
+        except HostUnavailable as exc:
+            print(f"❌ server {name}：{exc}")
+            print("   需要：① server 已带 token 启动；② 运行 --pin 时设置同一个 FINWISE_MCP_TOKEN")
+            continue
+        for t in tools:
+            print(f"\n========== 待审核：{name} / {t.name} ==========")
+            print("【描述】")
+            print(t.description or "（无）")
+            print("【参数 schema】")
+            print(json.dumps(t.input_schema, ensure_ascii=False, indent=2))
+        print(f"\n# 审核通过后，把下面这段写进 mcp_config.yaml 的 mcp_servers.{name} 下：")
+        print("    pinned_tools:")
+        for t in tools:
+            print(f"      {t.name}: {tool_fingerprint(t)}")
+
+
 async def main() -> None:
     token = os.environ.get("FINWISE_MCP_TOKEN", "")
     host = McpHost(load_config())
@@ -409,4 +493,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(print_pins() if "--pin" in sys.argv else main())

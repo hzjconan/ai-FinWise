@@ -15,6 +15,8 @@ mcp_servers:
     connect:
       attempts: 3                            # 连不上时最多试几次（第 6 步：重试）
       backoff_seconds: 0.5                   # 每次失败后等待时间翻倍：0.5s、1s……（指数退避）
+    pinned_tools:
+      search_products: ddb213c407f533363a449c114a34703de40074083236f24180e62b5b48e63beb
 
 agents:
   wealth_advisor:                            # 理财顾问 agent：只能用产品查询

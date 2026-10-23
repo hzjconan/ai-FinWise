@@ -23,6 +23,7 @@ L03（MCP 协议与 Skills）动手部分的**独立环境**，隔离于 `backen
 - HTTP：`.venv/bin/python finwise_mcp_server.py --http [--port 8765]`（默认 8765，避开后端的 8000）
 - HTTP + 鉴权：`FINWISE_MCP_TOKEN=<token> .venv/bin/python finwise_mcp_server.py --http`
 - 线上 Host 演示（需 bridge）：`FINWISE_MCP_TOKEN=<同一个 token> .venv/bin/python online_host.py`
+- 审核工具、生成指纹（第 7 步 7a）：`FINWISE_MCP_TOKEN=<同一个 token> .venv/bin/python online_host.py --pin`，读完打印的描述和参数后，把指纹写进 `mcp_config.yaml` 的 `pinned_tools`
 
 ## 跑
 ```
