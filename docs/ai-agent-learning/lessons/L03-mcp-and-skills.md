@@ -22,7 +22,7 @@
 | 3 | 协议层：JSON-RPC 2.0，一次会话的生命周期 | ✅ |
 | 4 | 传输层：stdio vs Streamable HTTP，有状态 vs 无状态 | ✅ |
 | 5 | 动手：把 FinWise 的 `search_products` 包成 MCP server，接入 Claude Code | ✅ |
-| 6 | 失败策略与幂等：校验、退避、超时、熔断、降级链 | ⬜ |
+| 6 | 失败策略与幂等：校验、退避、超时、熔断、降级链 | ✅ |
 | 7 | MCP 的安全：工具描述注入、最小权限 | ⬜ |
 | 8 | Skills：是什么、和 MCP / tool 的区别、skill 太多怎么提高命中率 | ⬜ |
 | 9 | 穿插复习题：Q33（Function Calling vs 纯 Prompt）、Q34（JSON 不稳定的防御层级） | ⬜ |
@@ -936,5 +936,198 @@ Issue: Dynamic Client Registration rejected (HTTP 401): {"error": "unauthorized"
 > 线上 Host 由**你的代码**完成：**"注册"**（配置白名单、按 agent 分配）、**鉴权**（token 从环境变量注入请求头，**全程不进模型**，审计验证）、**连接管理**（共享 HTTP 客户端 + 工具缓存长期持有，**MCP 会话按请求开关**——别长期持有带后台任务的客户端）、**故障处理**（重试 + 指数退避、冷却、降级、自动重连）。
 > server 端用 **ASGI 中间件**挡未授权请求（401 + `WWW-Authenticate`），比较 token 用 **`hmac.compare_digest`**（防时序攻击）。`server.run()` = 生成 Web 应用 + uvicorn 运行，拆开才能插中间件。
 > 实测：**模型会自作主张补单位**（0.16 → 16%）→ 输出端要数字硬校验，数据端要统一并写明单位。
+
+---
+
+## 第 6 步 · 失败策略与幂等
+
+面试原题"MCP 调用失败怎么处理"的参考清单：
+```
+调用前：校验参数（schema、pydantic），失败让 LLM 重试
+调用时：指数退避重试、超时控制、熔断器、降级链（主工具失败换备用）
+调用后：输出校验（空值是失败还是确实为空）、pydantic 校验结构化内容
+兜底：  多次失败转人工
+另外：  幂等，重复调用不产生副作用
+```
+
+大半已经亲手做过：
+
+| 阶段 | 手段 | 在哪做过 |
+|---|---|---|
+| 调用前 | schema 校验，失败让模型重试 | 🔁 5a / 5c：`Literal` 自动校验，R3 → `isError`，模型读到能改 |
+| 调用时 | 指数退避重试 | 🔁 5e-3 `list_tools_with_retry`；阶段七 R1 |
+| 调用时 | 超时 | 🔁 阶段七 L1 |
+| 调用时 | 熔断器 | 🔁 5e-3 的"冷却"是简化版 |
+| 调用时 | 降级 | 🔁 5e-3 `DEGRADED_ANSWER`；5e-2 可降级到 stdio 版 |
+| 调用后 | 输出校验 | 🔁 L02 第 8 步数字硬校验；5e-3"模型补单位" |
+| — | **幂等** | ❌ 还没做过 |
+
+### 哪些错误该重试
+
+> **💬 课堂问答**
+>
+> **🙋 问**：`list_tools_with_retry` 对所有错误都重试（错误 token 也重试了 2 次）。A 连接被拒绝（重启中）/ B 401 token 错误 / C 请求超时（server 忙）/ D 503 过载 / E 参数校验失败（R3），哪些值得重试？  
+>
+> **🧑 我的回答**：A、C、D 可以重试，B、E 重试也没用。E参数错误，好像在之前的课程讲过，重试没有意义。  
+>
+> **🤖 点评**：✅ 完全正确。  
+> ➕ 重试 B 不只浪费时间：**推迟了降级**（用户多等两次退避）、**可能触发账号锁定或告警**（短时间多次认证失败像攻击）。  
+> ⚠️ E 要分清：**代码原样重试**没意义；面试原题"失败给 LLM 重试"是**把错误喂回模型、让模型改参数**再调（🔁 5c `isError` 的意义）。
+
+| 类型 | 特点 | 例子 | 处理 |
+|---|---|---|---|
+| **暂时性错误**（transient） | 原因暂时，过会儿可能自己好 | 连接失败、超时、5xx、**429 限流** | **重试 + 退避 + 次数上限** |
+| **永久性错误**（permanent） | 原因不会自己消失 | 401、403、404、参数错误 | **不重试**，直接失败 / 降级（参数错误喂回模型） |
+
+### 超时 ≠ 没执行 → 幂等
+
+> **💬 课堂问答**
+>
+> **🙋 问**：假设有 `buy_product(code, amount)` 下单工具，调用 10 秒没响应 → 按"超时可重试"再调一次。会出什么问题？（提示：超时能不能说明 server 没执行？）  
+>
+> **🧑 我的回答**：重试可能重复下单，因为超时可能确实因为服务器这次处理速度慢（可能cpu繁忙），或者网络原因  
+>
+> **🤖 点评**：✅ 对。超时只说明 Host **没收到响应**，三种可能 Host **区分不了**（下图）→ 只有**幂等**的操作才能放心超时重试。
+
+```
+① 请求在路上丢了，server 没收到           → 没执行，重试是对的
+② server 执行完了，但响应丢了 / 慢了       → 已下单，重试 = 重复下单 ❌
+③ server 还在慢慢执行（CPU 繁忙）          → 马上会下单，重试 = 重复下单 ❌
+```
+
+📛 **幂等**（Idempotent）：同一操作执行一次和多次，效果完全一样。
+
+| 操作 | 幂等 | 原因 |
+|---|---|---|
+| `search_products("C3")` | ✅ | 只读 |
+| `set_risk_level(user, "C3")` | ✅ | "设成某值"，设几次结果都一样 |
+| `buy_product("P-BOND", 10000)` | ❌ | 每次**新增**一笔订单 |
+| `add_balance(user, 100)` | ❌ | 每次在原有基础上**再加** |
+规律：只读、"设成某值"天然幂等；"新增"、"加减"不幂等。
+
+**幂等键**（idempotency key）：Host 第一次发起操作时生成唯一 ID，**重试带同一个 ID**；server 见过就不再执行，直接返回之前的结果：
+```
+第 1 次：buy_product(..., idempotency_key="a1b2c3") → 没见过 → 下单 → 记 {a1b2c3: 订单#888} →（响应丢了）
+重   试：buy_product(..., idempotency_key="a1b2c3") → 见过 → 不再下单 → 返回"订单#888"
+```
+- 支付 API 大多这样做（如 Stripe 的 `Idempotency-Key` 请求头）。
+- ① **幂等键由 Host 代码生成，不交给模型**（模型重试时可能给出另一个 key；🔁 B#7 关键值不交给模型）。
+- ② agent 更隐蔽的重复来源：**模型自己再调一次**（读到"调用失败"很自然再调）→ key 要按"**这一个业务操作**"生成（如"本次对话中用户确认购买的这一笔"），不是按每次 tool_use 生成。
+
+**MCP 工具注解**（annotations，SDK 实查字段）：`read_only_hint`（只读）、`idempotent_hint`（幂等）、`destructive_hint`（破坏性，删除 / 覆盖）、`open_world_hint`（访问外部世界）。Host 可据此决定：`search_products` 只读 → 放心自动重试；`buy_product` 破坏性且非幂等 → 不自动重试或先请用户确认。⚠️ 都叫 **hint**：server 自己声明，Host 不能全信（第 7 步：恶意 server 可把危险工具标成只读）。
+
+### 熔断器
+
+> **💬 课堂问答**
+>
+> **🙋 问**：线上 1000 个用户同时在用，产品 MCP server 突然挂了。没有冷却的话，每个请求都"连接 → 失败 → 等 0.5s → 失败 → 等 1s → 失败 → 降级"。会带来什么问题？（从用户侧和正在重启的 server 侧想）  
+>
+> **🧑 我的回答**：从mcp server这一侧考虑，他会收到很多请求，更容易压垮自己；从每个用户这一侧看，会等待很长时间，然后最终才降级 - 等很长时间，等到一个非理想的结果  
+>
+> **🤖 点评**：✅ 两个角度都对。📛 **server 侧 = 重试风暴**（retry storm）：每个请求再重试 2 次 → 流量 3 倍，刚起来又被压垮；退避时间都一样时还会**同一时刻一起重试**（📛 **惊群效应** thundering herd）。  
+> ➕ **用户侧**：每个请求白等 1.5s+ 最后还是降级，不如一开始就降级；更糟的是大量请求卡在等待、占着连接和内存 → **Host 自己也变慢**，连不需要产品查询的请求也被拖累 → 📛 **级联故障**（cascading failure，"雪崩"）。
+
+📛 **熔断器**（Circuit Breaker），名字来自家里的空气开关（短路就跳闸，排除问题再合上）：
+```
+                连续失败达到阈值（比如 5 次里失败 3 次）
+   ┌─────────┐ ──────────────────────────────────▶ ┌─────────┐
+   │ Closed  │                                      │  Open   │
+   │ （闭合） │ ◀────────┐                          │ （断开） │
+   └─────────┘          │                          └─────────┘
+   正常调用，            │ 试探成功                  不调用，直接失败 / 降级（快速失败）
+   统计失败次数          │                              │
+                   ┌──────────┐                        │
+                   │ Half-Open │ ◀──────────────────────┘
+                   │ （半开）   │   断开一段时间后（比如 30 秒）
+                   └──────────┘
+                   只放行一个"试探"请求：成功 → Closed；失败 → Open
+```
+- 对 server：Open 时完全不发请求，留恢复时间；恢复期只有一个试探请求。对用户：Open 时立刻降级，不白等。
+
+| | 5e-3 的冷却 | 完整熔断器 |
+|---|---|---|
+| 何时断开 | 失败**一次**就断开 | 按**阈值**（如一段时间失败率 > 50%），偶尔失败不算 |
+| 断开期间 | 直接降级 ✅ | 直接降级 ✅ |
+| 恢复时 | 冷却结束后**下一个请求**去试 | **只放一个试探请求**，其余继续降级 |
+- 5e-3 写法在单线程依次处理时没问题；线上并发时冷却结束那一刻几百个请求同时去试 → 又是一波小重试风暴。
+- 配套：**退避加随机抖动**（jitter），如"1 秒"改成"0.5~1.5 秒随机"，错开各客户端的重试时间。
+
+### 降级链、输出校验、转人工
+
+```
+① 主 MCP server
+② 备用 MCP server（另一个机房的副本）              ← 🔁 5e-2 的 stdio 版相当于备用路径
+③ 缓存结果（上次成功的产品列表，提示"数据可能不是最新"）
+④ 固定话术（"产品查询暂时不可用，请稍后再试"）      ← 5e-3 做到这层
+⑤ 转人工
+```
+- 金融场景：缓存适合名称、类型这类变化慢的信息；**收益率、净值等实时数据**用旧缓存可能误导，要么不用、要么醒目标注数据时间。
+- **"空"和"失败"分清**：`products: []` = 查成功了、确实没有（如实告知）；`isError: true` = 查询本身失败（重试 / 降级）。🔁 5a 工具描述里写"空列表时如实告知暂无合适产品"就是在帮模型区分。
+- **转人工时机**：多次失败、熔断已打开、**涉及资金**（如下单失败但不确定是否已扣款）时，交给人工，别让 agent 反复尝试。
+
+### 动手 6a · 修正重试分类（`online_host.py`）
+
+**实测发现：SDK 把 HTTP 状态码"吞掉"了**——临时小 server 分别返回 401 / 503 / 429，Host 拿到的异常：
+```
+401 → MCPError | code=-32603 | message=Server returned an error response
+503 → MCPError | code=-32603 | message=Server returned an error response
+429 → MCPError | code=-32603 | message=Server returned an error response
+连接被拒 → httpx2.ConnectError        超时 → httpx2.ConnectTimeout
+```
+读源码确认：响应状态码 ≥ 400 时统一生成一个"内部错误"。→ 光看异常分不出 503（该重试）和 401（不该重试）。
+**解决**：在 HTTP 层自己记状态码——`StatusRecorder` 挂在 HTTP 客户端的**响应钩子**（`event_hooks={"response": [...]}`）上。🔁 和 5c"isError 是 SDK 帮你加的"同一类经验：**用 SDK 要知道它替你做了什么，也要知道它丢掉了什么**。
+
+用户写的 `is_retryable`：
+```python
+root = _root_cause_exc(exc)
+if isinstance(root, (httpx2.TimeoutException, httpx2.NetworkError)):
+    return True
+if http_status is None:
+    return False
+return http_status == 429 or http_status >= 500
+```
+- 显式判断 `http_status is None`（否则 `None >= 500` 报错），比写成一行好读。
+- "未知错误不重试"= 不确定时选保守的一边（🔁 L02 fail-closed）。
+- 效果：错误 token → `HostUnavailable: 不可重试的错误（HTTP 401）`，**一次都不退避**（改之前白重试 2 次）；连接被拒 → 重试 2 次，退避 0.1s、0.2s。5e-3 的故障处理测试仍全部通过。
+
+### 动手 6b · 幂等键（新的 `order_mcp_server.py`）
+
+两个设计决定：
+- **下单工具单独一个 server**：加进产品查询 server 的话，理财顾问 agent 也能下单了（违反最小权限）→ 🔁 第 2 步"按业务领域拆 server"。订单只存在**内存**里（练习，不写数据库）。
+- **幂等键放在请求的 `_meta` 里，不放在工具参数里**（参数是模型填的，幂等键不能交给模型）：
+  ```python
+  client.call_tool("place_order", {"product_code": "REC-001", "amount": 10000},
+                   meta={"finwise/idempotency_key": str(uuid.uuid4())})   # Host 按业务操作生成
+  ```
+  server 用 `ctx.request_context.meta` 读取；工具参数 schema 里**只有 product_code 和 amount**，模型看不到 key（`ctx: Context` 参数由 SDK 注入，也不出现在 schema 里）。没带 key → `ToolError("缺少幂等键")`，拒绝执行。工具注解：`destructive_hint=True, idempotent_hint=True, read_only_hint=False`。
+
+用户写的 `record_order`：
+```python
+if key not in ORDERS:
+    order = {"order_id": f"ORD-{len(ORDERS) + 1:04d}",
+             "product_code": product_code, "amount": amount, "duplicate": False}
+    ORDERS[key] = order
+    return order
+existing = ORDERS[key]
+if existing["product_code"] == product_code and existing["amount"] == amount:
+    return {**existing, "duplicate": True}
+raise ToolError("幂等键已被另一笔订单使用")
+```
+- **参数不同为什么报错**而不返回旧订单：Host 有 bug 把旧 key 用在新订单上时，返回旧订单会让用户以为下单成功、其实新单没下；报错能尽早暴露（支付平台同样处理）。
+- **返回副本**（`{**existing, ...}`）不改存着的原订单。小细节：情况 ① 返回的是存进 `ORDERS` 的对象本身，调用方若修改会连带改掉存储，可同样返回 `dict(order)` 保持一致。
+- `:04d` = 补零到 4 位（1 → `0001`）。
+- 关键测试：模拟第一次调用"超时"（其实已下单），同一个 key 重试 → **只有一笔订单**，第二次 `duplicate: true`。
+
+**放到真实系统还差两件事**：
+1. **并发竞态**：两个相同 key 的请求几乎同时到达，都通过"key 不在吗？"检查 → 还是下了两单。"先检查、再写入"之间有空隙 → 在幂等键列建**数据库唯一索引**、**直接插入**，违反唯一约束就说明已用过、再查出旧订单返回 → 检查 + 写入合成一个**原子操作**。（与面试题"分布式任务只执行一次""支付时正好超时取消"同类，L05 展开。）
+2. **持久化 + 保留期限**：内存存储重启就没了（重启后同 key 重试又下一单）；真实系统要持久化，并设保留期（如 24 小时）定期清理。
+
+测试：mcp-lab 共 **48 个**（订单 server 8 + Host 23 + 产品 server 17）全部通过。
+
+### 📌 要记住的
+> **只重试暂时性错误**（连接失败、超时、5xx、429），指数退避 + 次数上限 + 随机抖动；**永久性错误**（401、403、404、参数错误）不重试，参数错误**喂回模型改参数**。
+> **超时 ≠ 没执行** → 只有**幂等**操作能放心超时重试；非幂等操作用**幂等键**（Host 代码按业务操作生成，重试带同一个 key）。MCP **工具注解**（read_only / idempotent / destructive）可指导 Host 的重试策略，但只是 server 的声明。
+> **熔断器**：Closed（统计失败）→ 超阈值 Open（快速失败，给下游恢复时间）→ Half-Open（只放一个试探）→ 成功恢复。防重试风暴、惊群、级联故障。**降级链**：主 → 备用 → 缓存（实时数据慎用）→ 固定话术 → 转人工。
+> 动手发现：**SDK 会吞掉 HTTP 状态码**，重试分类要在 HTTP 层自己记录；**幂等键放 `_meta` 不放参数**（模型看不到）；生产实现要靠**唯一索引**保证原子性、并持久化 + 设保留期。
 
 来源（第 3、4 步更正）：[Equixly: Stateless MCP](https://equixly.com/blog/2026/08/05/stateless-mcp/)、[Wavect 迁移指南](https://wavect.io/blog/mcp-stateless-server-migration-2026/)、[Microsoft: MCP Just Went Stateless](https://techcommunity.microsoft.com/blog/appsonazureblog/mcp-just-went-stateless-%E2%80%94-what-the-2026-spec-changes-about-scaling-on-app-servic/4530222)、[AAIF: MCP 2026 Spec Changes](https://aaif.io/blog/mcp-2026-changes-the-rules)、[Stacktree: breaking changes](https://stacktr.ee/blog/mcp-2026-spec-changes)、[Wikipedia: MCP](https://en.wikipedia.org/wiki/Model_Context_Protocol)

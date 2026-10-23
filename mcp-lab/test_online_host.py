@@ -294,3 +294,60 @@ def test_server_dies_midway_then_recovers(monkeypatch):
     assert mid in ("查询失败", h.DEGRADED_ANSWER) and avail_mid is False
     assert cool == h.DEGRADED_ANSWER and no_llm
     assert back.startswith("推荐 ") and avail_back is True
+
+
+# ---------- 6a：哪些错误值得重试 ----------
+
+import httpx2  # noqa: E402
+
+
+@pytest.mark.parametrize("exc, status, expected", [
+    (httpx2.ConnectError("refused"), None, True),                 # 连接被拒（server 在重启）
+    (httpx2.ReadTimeout("slow"), None, True),                     # 超时
+    (ExceptionGroup("wrapped", [httpx2.ConnectTimeout("t")]), None, True),   # SDK 包在 ExceptionGroup 里
+    (RuntimeError("mcp error"), 503, True),                       # 服务端过载
+    (RuntimeError("mcp error"), 500, True),
+    (RuntimeError("mcp error"), 429, True),                       # 限流
+    (RuntimeError("mcp error"), 401, False),                      # token 错误
+    (RuntimeError("mcp error"), 403, False),
+    (RuntimeError("mcp error"), 404, False),
+    (ValueError("bad params"), None, False),                      # 未知错误、没有状态码 → 不重试
+])
+def test_is_retryable(exc, status, expected):
+    assert h.is_retryable(exc, status) is expected
+
+
+def _count_sleeps(monkeypatch):
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(h.asyncio, "sleep", fake_sleep)
+    return sleeps
+
+
+def _list_with_status(url, token, connect):
+    async def _go():
+        status = h.StatusRecorder()
+        http = h.make_http_client({"Authorization": f"Bearer {token}"}, status)
+        try:
+            return await h.list_tools_with_retry(url, http, connect, status)
+        finally:
+            await http.aclose()
+    return _run(_go())
+
+
+def test_wrong_token_is_not_retried(http_server, monkeypatch):
+    sleeps = _count_sleeps(monkeypatch)
+    with pytest.raises(h.HostUnavailable, match="401"):
+        _list_with_status(http_server, "wrong", {"attempts": 3, "backoff_seconds": 0.1})
+    assert sleeps == []                                   # 401 是永久性错误：一次都不退避重试
+
+
+def test_connection_refused_is_retried_with_backoff(monkeypatch):
+    sleeps = _count_sleeps(monkeypatch)
+    url = f"http://127.0.0.1:{_free_port()}/mcp"          # 没人监听 → 连接被拒
+    with pytest.raises(h.HostUnavailable):
+        _list_with_status(url, TOKEN, {"attempts": 3, "backoff_seconds": 0.1})
+    assert sleeps == [0.1, 0.2]                           # 暂时性错误：重试 2 次，退避翻倍

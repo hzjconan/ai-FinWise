@@ -102,10 +102,26 @@ def server_settings(cfg: dict, server_name: str) -> tuple[str, dict[str, str], d
     return srv["url"], headers, srv.get("connect") or {}
 
 
-def make_http_client(headers: dict[str, str]) -> httpx2.AsyncClient:
+class StatusRecorder:
+    """记下最近一次 HTTP 响应的状态码（挂在 HTTP 客户端的响应钩子上）。
+
+    为什么需要它（第 6 步实测）：MCP SDK 把 401 / 429 / 503 等 HTTP 错误统一转成了同一个
+    MCPError(-32603, "Server returned an error response")，状态码丢了——光看异常分不出该不该重试。
+    所以在 HTTP 这一层自己记下状态码。"""
+
+    def __init__(self) -> None:
+        self.last: int | None = None
+
+    async def __call__(self, response) -> None:
+        self.last = response.status_code
+
+
+def make_http_client(headers: dict[str, str], status: StatusRecorder | None = None) -> httpx2.AsyncClient:
     """创建一个长期共用的 HTTP 客户端：请求头（含 token）配在这里，之后每个 MCP 会话都用它。
     httpx 的 AsyncClient 内部自带连接池（复用 TCP 连接、keep-alive），所以共用一个客户端就能避免每次重新握手。"""
-    return httpx2.AsyncClient(headers=headers, trust_env=False)   # trust_env=False：本机有代理，访问 127.0.0.1 别走代理
+    hooks = {"response": [status]} if status else {}
+    return httpx2.AsyncClient(headers=headers, trust_env=False,   # trust_env=False：本机有代理，访问 127.0.0.1 别走代理
+                              event_hooks=hooks)
 
 
 def mcp_client(url: str, http: httpx2.AsyncClient) -> Client:
@@ -213,13 +229,40 @@ async def run_agent(question: str, llm_call, mcp, tools: list[dict], audit: Audi
     return "抱歉，这个问题我没能在限定步数内处理完。"                  # 🔁 MAX_STEPS 兜底
 
 
-async def list_tools_with_retry(url: str, http: httpx2.AsyncClient, connect: dict) -> list:
-    """连接 server、拿一次工具列表。连不上就按指数退避重试，最后还不行就抛 HostUnavailable。
+# ========================= TODO 6a：哪些错误值得重试 =========================
+
+def is_retryable(exc: BaseException, http_status: int | None) -> bool:
+    """TODO 6a：这次失败是不是"暂时性错误"（值得退避后重试）。
+
+    参数：
+      exc         —— 捕获到的异常，可能被包在 ExceptionGroup 里（用 _root_cause_exc(exc) 取最里面那个）
+      http_status —— 这次请求收到的 HTTP 状态码；连接都没建立起来时是 None
+    规则（讲义第 6 步）：
+      - 根异常是 httpx2.TimeoutException（超时）或 httpx2.NetworkError（连接被拒、网络断开）→ True
+      - 否则看状态码：429（限流）或 >= 500（服务端错误）→ True
+      - 其他（401 / 403 / 404、参数错误、状态码为 None 的未知错误）→ False
+    提示：isinstance(x, (A, B)) 可以一次判断多个类型。
+    """
+    root = _root_cause_exc(exc)
+    if isinstance(root, (httpx2.TimeoutException, httpx2.NetworkError)):
+        return True
+    if http_status is None:
+        return False
+    return http_status == 429 or http_status >= 500
+
+# =============================================================================
+
+
+async def list_tools_with_retry(url: str, http: httpx2.AsyncClient, connect: dict,
+                                status: StatusRecorder | None = None) -> list:
+    """连接 server、拿一次工具列表。只对暂时性错误按指数退避重试；永久性错误立刻放弃（第 6 步）。
     （🔁 5e-2：Claude Code 有 /mcp 让人手动重连；线上没人做这件事，Host 得自己重试。）"""
     attempts = int(connect.get("attempts", 3))
     delay = float(connect.get("backoff_seconds", 0.5))
     last = None
     for i in range(1, attempts + 1):
+        if status:
+            status.last = None                   # 每次尝试前清空，避免读到上一次的状态码
         try:
             async with mcp_client(url, http) as c:
                 return (await c.list_tools()).tools
@@ -227,17 +270,26 @@ async def list_tools_with_retry(url: str, http: httpx2.AsyncClient, connect: dic
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
             last = exc
-            log.warning("连接 MCP server 失败（第 %d/%d 次）：%s", i, attempts, _root_cause(exc))
+            code = status.last if status else None
+            log.warning("连接 MCP server 失败（第 %d/%d 次，HTTP %s）：%s", i, attempts, code, _root_cause(exc))
+            if not is_retryable(exc, code):
+                raise HostUnavailable(f"不可重试的错误（HTTP {code}）：{_root_cause(exc)}") from None
             if i < attempts:
                 await asyncio.sleep(delay)
                 delay *= 2                       # 指数退避（🔁 阶段七 R1）
     raise HostUnavailable(f"连不上 {url}：{_root_cause(last)}")
 
 
-def _root_cause(exc: BaseException | None) -> str:
-    """把 ExceptionGroup 层层拆开，取最里面那个真正的错误，方便看日志。"""
+def _root_cause_exc(exc: BaseException | None) -> BaseException | None:
+    """把 ExceptionGroup 层层拆开，取最里面那个真正的异常。"""
     while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
         exc = exc.exceptions[0]
+    return exc
+
+
+def _root_cause(exc: BaseException | None) -> str:
+    """同上，转成"类型: 信息"字符串，方便看日志。"""
+    exc = _root_cause_exc(exc)
     return f"{type(exc).__name__}: {exc}"
 
 
@@ -261,6 +313,7 @@ class McpHost:
         self.unavailable_reason = "尚未启动"
         self._last_attempt = float("-inf")
         self._http: httpx2.AsyncClient | None = None
+        self._status = StatusRecorder()            # 记录 HTTP 状态码，用于判断是否值得重试
         self._url = ""
         self._connect: dict = {}
 
@@ -276,7 +329,7 @@ class McpHost:
         except HostUnavailable as exc:
             self._mark_unavailable(str(exc))
             return
-        self._http = make_http_client(headers)
+        self._http = make_http_client(headers, self._status)
         await self._try_connect()
 
     async def shutdown(self) -> None:
@@ -315,7 +368,7 @@ class McpHost:
     async def _try_connect(self) -> bool:
         self._last_attempt = time.monotonic()
         try:
-            mcp_tools = await list_tools_with_retry(self._url, self._http, self._connect)   # ③ 连接 + 取工具列表
+            mcp_tools = await list_tools_with_retry(self._url, self._http, self._connect, self._status)  # ③
         except HostUnavailable as exc:
             self._mark_unavailable(str(exc))
             return False
