@@ -25,3 +25,19 @@ dev = [
 prod = [
     "psycopg2-binary>=2.9.0",
 ]
+# scratch/ 学习脚本（阶段四~五、L01~L02）用到的依赖；不影响生产安装。
+# 安装：pip install -e ".[dev,scratch]"
+# 版本钉死：是 2026-10 重建 venv 时实际验证可用的组合（torch 2.2.2 需要 numpy<2）。
+scratch = [
+    "numpy==1.26.4",
+    "torch==2.2.2",
+    "transformers==4.57.6",
+    "sentence-transformers==2.7.0",
+    "chromadb==1.5.9",
+]
+
+# 只把 app/ 打包。不写这一段时，setuptools 自动发现会看到 app / scratch / prompts / alembic
+# 多个顶层目录而拒绝打包，导致 `pip install -e .` 失败（2026-10 重建 venv 时遇到）。
+[tool.setuptools.packages.find]
+include = ["app*"]
+

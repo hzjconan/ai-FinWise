@@ -5,6 +5,16 @@
 
 > 这些是学习脚本，不是业务代码（不在 `backend/app/` 下，不触发测试硬约束）。放心改、随便跑。
 
+## 前置：安装依赖
+
+阶段四之后的脚本（embedding、向量库、重排等）需要额外依赖，已声明在 `backend/pyproject.toml` 的 `scratch` 可选组里（版本钉死）：
+
+```bash
+cd backend
+/opt/homebrew/bin/python3.12 -m venv .venv
+.venv/bin/pip install -e ".[dev,scratch]"
+```
+
 ## 前置：启动 bridge
 
 脚本通过官方 `anthropic` SDK 调用，但把 base_url 指向本地 **claude-cli-bridge**，

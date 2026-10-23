@@ -125,4 +125,5 @@
 | 8 | **N8 可观测性指标**：trace/span 贯穿、token/延迟/成功率/错误分类、Prometheus/OTel | 可选 | — | ⬜ |
 | 9 | **N9 文档入库** + R14 知识库存什么/怎么选型：表格/跨页/OCR、Docling、增量更新、chunk 冲突、权限过滤 | 可选：增量更新（hash + stable id） | — | ⬜ |
 | 10 | **N10 科普**（一页）：预训练 → SFT → RLHF、PPO vs GRPO、LoRA、vLLM vs Ollama；Fine-tune vs RAG vs Prompt 怎么选 | 无 | — | ⬜ |
+| 待定 | **Python 面试八股 补充学习/复习**（AI 面试多半会问）；可能一并安排 Go（`~/workspace/learn-program-language/go`）——2026-10-23 记录，范围和形式到时再讨论 | — | — | ⬜ |
 | 收尾 | 整理 2~3 个 FinWise STAR 项目故事 → 综合模拟面试一轮 → **全知识点 cheat sheet**（含阶段一~七，形式届时讨论）→ 结论沉淀后**删除本文档** | — | — | ⬜ |

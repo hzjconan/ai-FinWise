@@ -19,6 +19,9 @@
 - [解包必须数量精确](#解包必须数量精确)
 - [Literal 类型标注（vs Enum）](#literal-类型标注vs-enum)
 - [解包操作符 * 和 **（展开 list / dict）](#解包操作符--和-展开-list--dict)
+- [装饰器 @：把函数"登记"或"包一层"](#装饰器-把函数登记或包一层)
+- [包 / 模块路径：from a.b.c import X 对应哪个文件](#包--模块路径from-abc-import-x-对应哪个文件)
+- [依赖管理：pyproject.toml vs requirements.txt vs 锁文件](#依赖管理pyprojecttoml-vs-requirementstxt-vs-锁文件)
 
 ---
 
@@ -221,3 +224,95 @@ kw = {"x":1,"y":2,"z":3}; f(**kw)            # 等价 f(x=1, y=2, z=3)
 ```
 
 **一句话记**：`*` 拆**位置**（list/tuple），`**` 拆**键值**（dict）；在字面量里是"摊开合并"，在调用里是"拆成实参"。（这和函数定义里的 `def f(*args, **kwargs)` 是同一符号的"反向"——定义时是"收集"，调用/字面量时是"展开"。）
+
+---
+
+## 装饰器 @：把函数"登记"或"包一层"
+
+（L03 第 5 步：`@server.tool(...)`）
+
+**语法本质**：`@xxx` 写在函数定义上方，等价于"定义完函数后，立刻把它交给 `xxx` 处理，并用返回值替换原函数名"：
+```python
+@server.tool(description="查产品")
+def search_products(risk_level: str) -> dict: ...
+
+# 等价于：
+def search_products(risk_level: str) -> dict: ...
+search_products = server.tool(description="查产品")(search_products)
+#                 └─ 先调用 tool(...) 得到一个"装饰器函数"，再把 search_products 传进去
+```
+- 带括号的 `@server.tool(...)` 是**两步**：`tool(...)` 先返回一个装饰器，装饰器再接收函数。不带括号的 `@decorator` 是一步。
+- `server` 是**本文件创建的对象**（`server = MCPServer(...)`），不是 import 进来的；`.tool` 是它的方法。
+
+**两种常见用途**：
+
+| 用途 | 做什么 | 例子 |
+|---|---|---|
+| **登记** | 把函数记到某个表里，原函数基本不变 | FastAPI `@router.get("/products")`（登记到路由表）；MCP `@server.tool()`（登记到工具表） |
+| **包一层** | 返回一个新函数，在原函数前后加逻辑 | 计时、重试、缓存（`@functools.lru_cache`）、权限检查 |
+
+**MCP 里装饰器还做了什么**：SDK 读函数的**名字、参数类型注解、`Field(description=...)`、`description`**，自动生成 `tools/list` 里的工具 schema——相当于自动生成了 FinWise 手写的 `TOOLS_SCHEMA`。
+
+**JS 对照**：TS 也有 `@Decorator` 语法（Angular / NestJS 常见，如 NestJS 的 `@Get('/products')`），作用相同；没有装饰器语法时就是高阶函数：`const f2 = withRetry(f)`。
+
+---
+
+## 包 / 模块路径：from a.b.c import X 对应哪个文件
+
+（L03 第 5 步：`from mcp.server.mcpserver import MCPServer`）
+
+**点号路径 = 磁盘目录层级**：
+```
+from mcp.server.mcpserver import MCPServer
+     └─ site-packages/mcp/server/mcpserver/__init__.py 里导出的 MCPServer
+
+from app.services.chat_service import _execute_tool
+     └─ backend/app/services/chat_service.py 里的 _execute_tool
+```
+- **包（package）**= 一个目录（通常带 `__init__.py`）；**模块（module）**= 一个 `.py` 文件。
+- 第三方包装在当前 venv 的 `site-packages/` 下（如 `mcp-lab/.venv/lib/python3.12/site-packages/mcp/`）；自己项目的代码要在 `sys.path` 里能找到（`finwise_mcp_server.py` 开头就是把 `backend/` 加进 `sys.path`，才能 `import app`）。
+- **`from 包 import 名字` 只把"名字"带进当前文件，不会绑定包名**：写了 `from mcp.server.mcpserver import MCPServer` 之后，当前文件里并没有一个叫 `mcp` 的东西——所以若再写 `mcp = MCPServer(...)`，这个 `mcp` 只是普通变量（容易和包名看混，故改名 `server`）。
+- 查一个模块在哪：`python -c "import mcp.server.mcpserver as m; print(m.__file__)"`；查包信息：`pip show mcp`。
+
+**`sys.path` 的顺序：第一个找到的就用**（L03 追问：`insert(0, ...)` 换成 `append(...)` 会怎样）
+```
+默认：0 ''（脚本目录） → 1~3 标准库 → 4 venv 的 site-packages
+sys.path.insert(0, X)：X 最先被查找        sys.path.append(X)：X 最后被查找
+```
+| 情况（临时目录实测） | `insert(0)` | `append` |
+|---|---|---|
+| 脚本目录有个同名 `app.py` | ✅ 拿到 X 里的 app | ❌ 被同名 app.py 抢走 |
+| X 里有个 `logging.py` | ❌ 标准库 logging 被顶替（整个程序受影响） | ✅ 用标准库 |
+- `insert(0)`：保证拿到你要的包，但可能**顶替**同名标准库 / 第三方包；`append`：不顶替别人，但可能被前面的**同名模块抢走**。
+- 隐蔽细节：**没有 `__init__.py` 的目录是"命名空间包"**，查找时遇到会记下来继续往后找；后面若有真正的普通包（有 `__init__.py`），用真正的。所以 `backend/alembic/`（迁移脚本目录）不会顶替 pip 装的 alembic。
+- 根本解法：把项目**作为包安装**（`pip install -e ../backend`），不手动改 `sys.path`。
+
+**JS 对照**：`from a.b import X` ≈ `import { X } from 'a/b'`；`site-packages/` ≈ `node_modules/`。
+
+---
+
+## 依赖管理：pyproject.toml vs requirements.txt vs 锁文件
+
+（L03 第 5 步：给 `mcp-lab`、`langgraph-lab` 补 `requirements.txt`，给 backend 的 `pyproject.toml` 补 `scratch` 组）
+
+| | `pyproject.toml` | `requirements.txt` |
+|---|---|---|
+| 是什么 | 官方标准（PEP 621）的**项目描述文件** | 纯文本**包清单**，每行一个包 |
+| 写什么 | 项目名、版本、依赖、可选依赖组、**打包配置**、工具配置（pytest 等） | 只有包名和版本 |
+| `pip install -e .` 装项目本身 | ✅ 项目成为可安装、可 import 的包 | ❌ 只装依赖 |
+| 适合 | 正式应用 / 库（backend 有 `app/` 包） | 零散脚本（`mcp-lab`、`langgraph-lab`） |
+
+**JS 对照**：`pyproject.toml` ≈ `package.json`；`requirements.txt` ≈ 把 `npm install a@1.0 b@2.0` 写进文件；**锁文件** ≈ `package-lock.json`。
+
+**锁文件**：`requirements.txt` / `pyproject.toml` 通常只写**直接依赖**；间接依赖（如 mcp 依赖的 anyio、starlette）没钉，升级也可能出问题。要完全可复现 → 锁文件钉死全部版本：`pip freeze > requirements.lock`，或用 **uv**（`uv.lock`）、**Poetry**（`poetry.lock`）、pip-tools。新项目趋势：**全用 `pyproject.toml` + 锁文件**。
+
+**范围 vs 精确版本**：
+- `fastapi>=0.115.0`（范围）：**库**的惯例，方便被别人的项目兼容。
+- `torch==2.2.2`（精确）：**应用 / 环境**的惯例（或交给锁文件）。backend 的 `scratch` 组钉死，是因为 torch 2.2.2 要求 numpy<2，实测过的组合。
+
+**可选依赖组**（`[project.optional-dependencies]`）：`pip install -e ".[dev,scratch]"` 才装；生产 `pip install .` 不装 → 大包（torch）不进生产。
+
+**打包配置的坑**：项目根下有多个顶层目录（`app/`、`scratch/`、`alembic/`…）时，setuptools 自动发现会拒绝打包、`pip install -e .` 失败 → 写 `[tool.setuptools.packages.find] include = ["app*"]` 明确只打包 `app`。
+
+**为什么要钉版本**（这次的真实例子）：`mcp` 1.x → 2.x 把 `FastMCP` 改名为 `MCPServer`，不钉版本的话别人装到新版，代码直接 import 报错。
+

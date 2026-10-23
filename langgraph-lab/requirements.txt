@@ -1,0 +1,12 @@
+# langgraph-lab 的依赖（阶段六 LangGraph）。版本取自当时实际使用的环境，钉死以便复现。
+# 安装：/opt/homebrew/bin/python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+langgraph==1.2.10
+langchain-anthropic==1.5.4
+langchain-core==1.5.3
+anthropic==0.121.0
+langsmith==0.10.17
+python-dotenv==1.2.2
+httpx==0.28.1
+# mock_bridge.py（教学用的假 bridge）
+fastapi==0.141.1
+uvicorn==0.52.1

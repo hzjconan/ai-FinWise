@@ -1,0 +1,21 @@
+# 5e-3 · 线上 Host 的 MCP 配置——"注册"在线上变成了这份文件（讲义第 5 步"线上还有注册吗"）
+#
+# 线上没有 `claude mcp add`：要连哪些 server、怎么连，写在应用自己的配置里，跟着代码评审和发布走。
+# 原则：
+#   1. 这是一份【白名单】——Host 只会连这里列出的 server，模型无权决定去连别的地址
+#   2. 凭证【只写环境变量的名字】，真实的值由部署时注入（这里本地演示：你在终端 export）
+#   3. 按 agent 分配 server（最小权限）：每个 agent 只能用它需要的 server
+
+mcp_servers:
+  product:                                   # 本地演示：就是 5e-1 用 --http 起的那个 server
+    url: http://127.0.0.1:8765/mcp
+    auth:
+      type: bearer
+      token_env: FINWISE_MCP_TOKEN           # 只写"从哪个环境变量读"，不写真实 token
+    connect:
+      attempts: 3                            # 连不上时最多试几次（第 6 步：重试）
+      backoff_seconds: 0.5                   # 每次失败后等待时间翻倍：0.5s、1s……（指数退避）
+
+agents:
+  wealth_advisor:                            # 理财顾问 agent：只能用产品查询
+    mcp_servers: [product]

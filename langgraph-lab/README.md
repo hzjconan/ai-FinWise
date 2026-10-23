@@ -2,7 +2,8 @@
 
 阶段六 LangGraph 学习的**独立环境**，刻意隔离于 `backend/`（不污染 FinWise 的 Anthropic 栈）。
 
-- **独立 venv**：`langgraph-lab/.venv`（不提交，已 gitignore）。装了 langgraph 1.2.10 + langchain-anthropic 1.5.4 + anthropic SDK。
+- **独立 venv**：`langgraph-lab/.venv`（不提交，已 gitignore）。依赖清单在 **`requirements.txt`**（版本钉死）：langgraph 1.2.10 + langchain-anthropic 1.5.4 + anthropic SDK 等。
+  建环境：`cd langgraph-lab && /opt/homebrew/bin/python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt`
 - **LLM 来源**：基础篇节点走本地 bridge（`bash backend/scratch/run_bridge.sh` 起在 :8787），裸 anthropic SDK 调用（bridge 兼容）。`.env`（gitignore）放 LangSmith key 等。
 - **概念/笔记**：见 `docs/ai-agent-learning/langgraph-notes.md`。
 

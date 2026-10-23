@@ -1,0 +1,11 @@
+# mcp-lab 的依赖（L03）。版本钉死：mcp 1.x → 2.x 就有不兼容改动（FastMCP 改名 MCPServer），不钉版本别人装到新版会直接跑不起来。
+# 安装：/opt/homebrew/bin/python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+mcp==2.3.0
+# 以下是 import FinWise 后端查询代码（app.*）所需的依赖
+SQLAlchemy==2.1.6
+pydantic==2.14.1
+pydantic-settings==2.16.1
+PyYAML==6.0.3
+anthropic==2.1.0
+# 测试
+pytest==9.1.1
