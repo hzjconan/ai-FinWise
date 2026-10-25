@@ -1,6 +1,6 @@
 ---
 name: dev-server
-description: 启动前端和后端开发服务器，如果端口被占用则先杀掉进程再启动
+description: 启动前端和后端开发服务器（日常开发调试用），端口被占用会先杀掉占用进程再启动。不用于运行 E2E 测试——E2E 请用 run-tests，它会用独立的测试数据库自己启动和清理服务器。
 allowed-tools: Bash
 ---
 

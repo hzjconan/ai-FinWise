@@ -24,7 +24,7 @@
 | 5 | 动手：把 FinWise 的 `search_products` 包成 MCP server，接入 Claude Code | ✅ |
 | 6 | 失败策略与幂等：校验、退避、超时、熔断、降级链 | ✅ |
 | 7 | MCP 的安全：工具描述注入、最小权限 | ✅ |
-| 8 | Skills：是什么、和 MCP / tool 的区别、skill 太多怎么提高命中率 | ⬜ |
+| 8 | Skills：是什么、和 MCP / tool 的区别、skill 太多怎么提高命中率 | ✅ |
 | 9 | 穿插复习题：Q33（Function Calling vs 纯 Prompt）、Q34（JSON 不稳定的防御层级） | ⬜ |
 
 ---
@@ -1293,5 +1293,177 @@ def filter_pinned_tools(mcp_tools, pinned):
 ### 📌 要记住的
 > 工具**描述**和工具**返回的数据**都会进入模型上下文 → 两个新注入入口：**工具投毒**（含跟踪变更、影子工具）和**间接注入**（≈ 存储型 XSS，但**没有可靠的转义**）。
 > 防御靠**结构**：白名单 + 固定版本 + 审核并**固定描述指纹**（算哈希前先**规范化**；7a 实测：被篡改的描述发给模型 0 次；更新指纹纳入代码评审）、**按 agent 隔离 server**、**拆开致命三要素**（不可信内容 + 私密数据 + 对外通信）、**身份 / 收件人这类参数由认证决定、不让模型填**（防越权）、凭证不进上下文、危险操作人工确认。
+
+---
+
+## 第 8 步 · Skills
+
+📛 **Skill**（技能）：Anthropic 2025 年推出的机制，给 agent **补充"怎么做某件事"的知识**。形式就是一个文件夹：
+```
+.claude/skills/dev-server/
+├── SKILL.md          ← 必需：开头 YAML 元数据（name、description），后面是正文
+└── （可选）脚本、模板、参考文档……
+```
+
+### 核心机制：渐进式加载（progressive disclosure）
+
+| 层 | 内容 | 什么时候进入上下文 | 大小 |
+|---|---|---|---|
+| 第 1 层 | **name + description** | **始终**都在 | 每个一两行 |
+| 第 2 层 | SKILL.md **正文** | 模型判断"这次要用"时才读取 | 几百到几千字 |
+| 第 3 层 | 附带的脚本、参考文档 | 正文说"需要时去读 / 运行"时才用 | 不限 |
+- 本会话系统提示里能看到第 1 层（`- dev-server: 启动前端和后端开发服务器……`），正文平时看不到。
+- 🔁 对比第 2 / 7 步：MCP 是**所有工具完整定义一连上就全进上下文**；skill 一开始只放一句描述 → 100 个 skill 常驻开销也只有 100 行（"Skill 按需加载、省 token"）。
+
+### 负面边界要写在第 1 层
+
+> **💬 课堂问答**
+>
+> **🙋 问**：`dev-server` 正文最后一节写着"运行 E2E 测试时不要使用此 skill"。结合三层加载，这句写在这里能有效防止误用吗？（提示：决定要不要用时看得到哪一层？）  
+>
+> **🧑 我的回答**：能，模型一开始不知道这个"注意"，但是当决定要调用这个skill的时候就会看到，最终应该不会执行  
+>
+> **🤖 点评**：⚠️ 说对一半：读正文时**有机会**放弃，但这道防线比看起来弱：  
+> ① **读正文时模型已经"选好了"**（🔁 05 自回归：已输出的内容影响后续），读到一句"注意"不一定推翻决定；  
+> ② **正确的 skill 可能根本没被选中**——选择发生在第 1 层、比较的是描述。用户说"把服务起起来，跑一下 E2E"：dev-server 描述"启动……开发服务器"高度吻合"起服务"，又完全没提"不适用于 E2E" → 很可能先选它；  
+> ③ 就算最后放弃也浪费一轮；更糟的是正文第 1 步就是"杀掉占用端口的进程"，可能**没读到最后的注意就开始执行**。  
+> 🔁 和第 7 步指纹校验同理：**防线放在"进入之前"，不是"进入之后"**。
+
+改法：负面边界 + **该用哪个替代**写进 description，正文里的注意**保留**作第二道防线（纵深防御）。已改：
+```yaml
+description: 启动前端和后端开发服务器（日常开发调试用），端口被占用会先杀掉占用进程再启动。不用于运行 E2E 测试——E2E 请用 run-tests，它会用独立的测试数据库自己启动和清理服务器。
+```
+- 顺带发现：`run-tests` 文件名是小写 `skill.md`（约定是 `SKILL.md`）。Mac 默认不区分大小写所以能用，但在区分大小写的 Linux / CI 上**可能识别不到**。已改名（Mac 上直接改名 git 察觉不到，分两步：先改临时名再改 `SKILL.md`）。
+- ⚠️ 更正：我当时说"新 description 下次启动才生效"——**错的**：用户下一条消息时系统已推送新描述 → Claude Code **会在会话中途重新加载 skill 文件**（和"新加 MCP server 要重启"不同）。
+
+### skill 太多怎么提高命中率
+
+> **💬 课堂问答**
+>
+> **🙋 问**：一个 agent 装了 50 个 skill，模型每次要从 50 条描述里挑。有哪些办法提高命中率？（提示：选工具 / skill = L01 的检索问题，描述 ≈ chunk）  
+>
+> **🧑 我的回答**：a. 把skill根据类型放到不同的文件夹下面，比如处理pdf, word文档之类的，放到documents下，负责文件读写的放到files下；b. 非常清晰地写出来什么时候该用这个skill，如果有明确知道的不该用的场景（比如刚才dev-server不该用在e2e场合）也要写出来  
+>
+> **🤖 点评**：✅ b 完全正确，最重要的一条。  
+> ✅ a 方向对（面试原题"分层，按类别分好大类"），⚠️ 但**物理上分文件夹本身不提高命中率**：模型看到的是所有 skill 的 name + description 列表，看不到文件夹；而且约定路径是 `.claude/skills/<名字>/SKILL.md`，多套一层分类目录**可能不被识别**（未实测）。分类真正起作用的方式是**改变每次要从多少个里挑**：按 agent 只装需要的（🔁 第 2 步按 agent 分配 server）、或两级选择（先选大类再选具体）。
+
+| 办法 | 说明 |
+|---|---|
+| a. 按 agent 只装需要的 / 两级选择 | 减少每次的候选数 |
+| b. 写清该用 / 不该用 / 该用哪个替代 | 负面边界写进 description |
+| c. 描述之间拉开距离 | 每加一个 skill 想想和谁容易混，两边都写清区别 |
+| d. 用用户会说的词写描述 | 选 skill = 一次检索（🔁 L01 BM25 靠字面、embedding 靠意思）；写"PDF""合并文件"而非"文档处理工具"；首句关键词齐全（🔁 5a） |
+| e. 能点名就用斜杠命令 | `/run-tests` 跳过选择环节 |
+| f. 用 eval 量 | 🔁 L02：测试请求集（期望用哪个 skill = golden set），改描述前后对比，重点看易混的几对 |
+| g. 数量极多时先检索预筛 | embedding 检索出十几个再放进上下文（🔁 第 2 步工具搜索 / L01 召回） |
+
+### 线上 agent 怎么用 skill
+
+> **❓ 我的追问**：现在本地用的是 Claude Code，可以在 .claude 下放 xxx/SKILL.md，那线上的 agent 应用呢？  
+
+（查了 Claude API 参考资料）三种用法，取决于 Host：
+1. **直接调 Claude API**：用 **Skills API**（已正式发布，SDK `client.skills.*`）上传 skill 拿到 ID；调 Messages API 时带 `container={"skills": [...]}` 并**必须开启代码执行工具**（`code_execution`）——skill 第 3 层的脚本要有地方运行，API 给这次请求分配一个**沙箱容器**。Anthropic 还提供生成 PPT / Excel / Word / PDF 的现成 skill。**本地 skill 依赖 Claude Code 的文件系统和 shell，API 上依赖容器。**
+2. **Claude Agent SDK**（= Claude Code 做成的库）：和本地一样从文件系统读 `.claude/skills/<名字>/SKILL.md`。
+3. **Managed Agents**（Anthropic 托管 agent loop + 每会话一个容器）：在 agent 配置里声明 skill 和 MCP。
+- **FinWise 这种自己写 loop、没沙箱没 shell 的应用**：想要"很多份操作说明、平时只放描述、用到才加载全文"的好处，可以**自己实现**：
+  ```
+  system prompt：可用的操作指南列表（每条 name + description）       ← 第 1 层
+  工具：load_guide(name) → 返回那份指南全文                          ← 第 2 层
+  ```
+  指南存自己的数据库 / 文件，不需要容器。🔁 第 2 步工具搜索同一思路。⚠️ 指南内容进上下文 = 等同 system prompt → **只能由团队编写和审核**（不能用户上传、不能外部抓取），可同样固定指纹（🔁 第 7 步）。
+
+> **❓ 我的追问**：用 API 的方式的话，skill 附带的脚本是跑在 LLM 里的？  
+> → **不是。LLM 只生成文字，从不执行代码**（🔁 第 3 步"LLM 只输出 tool_use"）。区别只是"外面的程序"由谁运行：
+
+| 场景 | 模型输出 | 谁执行 | 在哪执行 |
+|---|---|---|---|
+| Claude Code（本地 skill） | tool_use：Bash 运行脚本 | Claude Code | 你的电脑 |
+| FinWise（阶段三） | tool_use：search_products | `_execute_tool` | 你的服务器 |
+| 5e-3 线上 Host | tool_use：search_products | MCP server | MCP server 所在机器 |
+| **Claude API + 代码执行** | tool_use：code_execution 运行脚本 | **Anthropic 服务器** | **Anthropic 机房的沙箱容器** |
+```
+你的程序 ──请求（container.skills + code_execution）──▶ Anthropic
+  ① 模型读 skill 描述 → 决定使用 → 输出 tool_use："运行 python scripts/make_report.py"
+  ② Anthropic 服务端把命令放进【沙箱容器】执行（有 skill 文件、预装 Python 库）
+  ③ 执行结果作为工具结果交回模型 → ④ 模型继续或给出最终回答
+你的程序 ◀──── 最终响应
+```
+- 就是阶段三手写的 agent loop，只是整个循环在 Anthropic 服务器上完成 → 📛 **服务端工具**（server tool）。
+- 沙箱容器 ≈ 临时、隔离的小 Linux 机器：预装常用库（生成 Word / PPT / PDF / 图表）、网络受限、文件一段时间内保留。
+- ⚠️ skill 处理的数据会进入外部容器 → 金融场景**先确认合规**（🔁 L02 第 6 步"数据能不能出去"）。
+
+### Tool、MCP、Skill 怎么分
+
+> **💬 课堂问答**
+>
+> **🙋 问**：Tool、MCP、Skill 分别解决什么问题？什么情况下写 skill 而不是做 MCP server？  
+>
+> **🧑 我的回答**：Tool、MCP、Skill 这三者分别解决什么问题，我回答不上来，看起来都差不多，都是给模型提供了额外的能力，看起来只是形式不同。什么情况下用skill而不是mcp，我觉得如果skill能做到的就不需要mcp  
+>
+> **🤖 点评**：容易混是因为从模型角度看三者最终都变成"工具调用"或"上下文里一段文字"。换个角度问"**给模型增加的到底是什么**"就清楚了（下表）。  
+> ⚠️ "skill 能做到就不需要 MCP"**有前提**：Host 有 shell、已有现成 CLI / API。skill **只能用 Host 已有的工具**，没 shell、没现成 CLI、需要统一鉴权时替代不了 MCP。
+
+| | 类比（新入职员工） | 增加了什么 |
+|---|---|---|
+| **Tool** | 一个具体的工具 / 按钮（"查询"按钮） | **一个能做的动作**（基本单位） |
+| **MCP** | 公司的标准插座 + 布线（统一接口、门禁卡、跨部门共享） | **接入新系统的通道**（标准化、权限、共享） |
+| **Skill** | 一本操作手册（步骤、注意事项、约定） | **知识**：怎么用**已有的**工具把事做好，**本身不增加新动作** |
+
+- 亲手做过的例子：**dev-server**（Skill）——没它模型也能起服务器（本来就有 Bash），它只补了端口、顺序、`dev.sh`、E2E 别用 → **能力没变，知识变了**。**mcp-lab 产品查询**（MCP）——网页聊天没 Bash 也连不了库，接入后多了一个以前做不到的动作，且多 Host 共用、统一鉴权 → **能力变了**。**chat_service 的 search_products**（Tool）——同一个动作写死在 FinWise 里 → **能力变了但只属于这个应用**。🔁 第 3 步"MCP 工具在模型眼里和本地工具没区别"：**Tool 是基本单位，MCP 是分发和共享工具的方式**。
+- skill 做不到的：Host **没有 shell**（脚本没地方跑）；**没有现成 CLI**；**多用户共用、要统一鉴权和审计**（脚本以当前用户身份跑，凭证散落各处）→ 用 MCP。
+- 常组合：skill 正文写"先用 `search_products`（MCP）查产品、再用 `get_my_profile` 查持仓、按此模板排版"——MCP 提供动作，skill 提供方法。
+
+> **💬 课堂问答**
+>
+> **🙋 问**：A 让 Claude Code 按公司规范写 git 提交信息 / B 让 FinWise 网页理财顾问能查客户实时持仓（数据在另一团队的系统）/ C 让 Claude Code 操作内部工单系统（只有 HTTP API、每人只能看自己有权限的工单）——各用什么？  
+>
+> **🧑 我的回答**：A 用 Skill，B 用 MCP，C 用 MCP  
+>
+> **🤖 点评**：✅ 全对。A：Claude Code 本来就能 `git commit`，缺的是规范（知识）。B：网页 agent 没 shell、数据在别的团队系统，需要对方提供的带鉴权接口。C：没现成 CLI、要按人授权（🔁 第 7 步"作用于谁"放 server 端由认证决定）。
+
+> **❓ 我的追问**：skill 也可以附带脚本，脚本可以提供任何能力（假设有执行条件），那是不是 skill 就完全够了？  
+
+**技术上是的**——skill + 脚本 ≈ "随 skill 分发的本地工具"。我前面"缺能力用 MCP、缺方法用 skill"说得太简单；更准确的划分维度是 **代码在哪一侧执行、信任边界在哪**：
+```
+Skill + 脚本：脚本在【agent 所在环境】执行（你的电脑 / API 分配的容器）
+MCP：         代码在【另一个服务】执行，agent 只能通过窄接口调用、拿结果
+```
+即使有执行条件也有四个差异：
+1. **凭证放在哪**：脚本调 API → 凭证必须在 agent 能接触的环境里，agent 有 shell，被注入后 `env` / `cat 配置` 就读出来（打破 5e-3"凭证不进模型能接触的地方"）；MCP 凭证留在 server，agent 的 token 只能调这几个操作。
+2. **能否限制模型**：有 shell 的 agent 可以改脚本、绕开脚本拿凭证直接调 API → **脚本对模型没约束力**；MCP 只开放这几个操作、参数 server 校验（🔁 5c）、权限 server 判断（🔁 第 7 步）→ **接口就是边界**。
+3. **谁来管**：脚本复制到每个环境、版本各异；MCP 部署一份、集中更新、审计、限流、熔断（🔁 第 1 / 6 步）。
+4. **依赖**：脚本的语言和库每个环境都要装；MCP 只在 server 装。
+- **skill + 脚本就够的情况**：执行环境可用、单人使用（或每人用自己的凭证）、凭证放本地可接受、不需要集中管控 → 开发者在自己电脑上用 Claude Code 的典型场景（用自己的 GitHub / 云账号，skill 教模型用 `gh` / `aws`）——🔁 第 2 步"CLI + Skill 在开发者圈子流行"。多用户、按人授权、凭证不能下发 → MCP。
+
+### skill 里的脚本最终是谁执行的
+
+> **❓ 我的追问**：假设 skill 里带了脚本，模型要执行这个脚本，最终是怎么被执行到的？LLM 只是输出说"我要执行它"，最终是谁执行的？  
+
+**执行者是 Host，不是 LLM。** 本会话就发生过一次（我用了 `claude-api` skill）：
+1. **第 1 层**：系统提示的 skill 列表里只有一句描述。
+2. **第 2 层**：我输出 `tool_use：Skill { "skill": "claude-api", "args": "…" }`——**"使用一个 skill"本身也是一次工具调用**（Claude Code 内置的 `Skill` 工具）。
+3. Claude Code 找到 `SKILL.md`，把**正文**作为工具结果返回，第一行是 `Base directory for this skill: /private/tmp/claude-501/bundled-skills/.../claude-api`。
+4. **第 3 层**：正文让读某个文件 / 运行某个脚本时，我**再输出一个 `tool_use`**（Read 或 Bash），路径用那个 base directory。
+
+脚本具体怎么执行（假设正文写"运行 `scripts/check_ports.sh`"）：
+```
+① 模型：输出 tool_use {"name": "Bash", "input": {"command": "bash .claude/skills/dev-server/scripts/check_ports.sh"}}
+        ← 模型做的只有这一件事：生成这段 JSON 文字
+② Claude Code（你电脑上的 Node.js 程序）收到后：
+     a. 检查权限：当前权限模式允许 Bash 吗？要先问用户吗？
+        （skill 头部 allowed-tools: Bash = 作者声明这个 skill 需要 Bash，Claude Code 据此决定可否不再逐条询问）
+     b. 在你的电脑上【启动一个 shell 子进程】执行命令
+     c. 收集 stdout、stderr、退出码
+③ 包装成 tool_result 交回模型 → ④ 模型决定下一步
+```
+- 🔁 第 ② 步和写过的三样东西一样：5c `raw_jsonrpc_demo.py` 用 `subprocess.Popen` 起子进程；FinWise agent loop 收到 tool_use 调 `_execute_tool`；5e-3 `run_agent` 收到 tool_use 经 MCP 调用。**不同的只是执行器**。
+- 用 API 时，第 ② 步由 **Anthropic 服务端**在**沙箱容器**里完成。
+- **安全要点**：脚本以**你的身份、在你的机器上**执行 → 能做的事 = 你这个用户能做的事（读文件、用凭证）→ **来路不明的 skill 和来路不明的 MCP server 一样危险**（🔁 第 7 步：装 stdio MCP server = 在你机器上执行命令）。Claude Code 第 ② 步的**权限确认**，就是 Host 在"模型想做"和"真正去做"之间的关卡（🔁 第 7 步"危险操作人工确认"的位置）。
+
+### 📌 要记住的
+> **Skill** = 操作手册 + 可选脚本，**渐进式加载**（描述常驻、正文选中才读、脚本按需用）。**选择只看第 1 层** → 负面边界和"该用哪个替代"要写进 **description**。命中率：写清该用 / 不该用、相似的拉开距离、用用户的话写描述（选 skill = 检索）、按 agent 只装需要的或两级选择、斜杠命令点名、用测试请求集评估、极多时检索预筛。
+> **Tool** = 一个动作（基本单位）；**MCP** = 标准化、跨应用共享工具的协议（远程、鉴权、集中管控）；**Skill** = 怎么做事的知识。skill 带脚本技术上能提供任何能力，但脚本**在 agent 环境里执行**（凭证要放进去、模型可绕开），MCP **在另一个服务里执行**（窄接口 + server 校验授权）→ 单人本地用 skill + 脚本就够，多用户按人授权用 MCP。
+> 线上用 skill：Claude API（Skills API 上传 + `container.skills` + **代码执行**，脚本在 Anthropic 的**沙箱容器**里跑，LLM 本身不执行代码）/ Agent SDK（同本地）/ Managed Agents；自己写 loop 的应用可自己实现"目录 + `load_guide`"。
+> **LLM 只输出 tool_use，执行的是 Host**：Claude Code 里用 skill 是一次 `Skill` 工具调用（读出正文），运行脚本是一次 `Bash` 调用（检查权限后在本机起子进程）。脚本以你的身份运行 → 来路不明的 skill 要审核，Host 的权限确认是"想做"和"去做"之间的关卡。
 
 来源（第 3、4 步更正）：[Equixly: Stateless MCP](https://equixly.com/blog/2026/08/05/stateless-mcp/)、[Wavect 迁移指南](https://wavect.io/blog/mcp-stateless-server-migration-2026/)、[Microsoft: MCP Just Went Stateless](https://techcommunity.microsoft.com/blog/appsonazureblog/mcp-just-went-stateless-%E2%80%94-what-the-2026-spec-changes-about-scaling-on-app-servic/4530222)、[AAIF: MCP 2026 Spec Changes](https://aaif.io/blog/mcp-2026-changes-the-rules)、[Stacktree: breaking changes](https://stacktr.ee/blog/mcp-2026-spec-changes)、[Wikipedia: MCP](https://en.wikipedia.org/wiki/Model_Context_Protocol)
