@@ -25,7 +25,7 @@
 | 6 | 失败策略与幂等：校验、退避、超时、熔断、降级链 | ✅ |
 | 7 | MCP 的安全：工具描述注入、最小权限 | ✅ |
 | 8 | Skills：是什么、和 MCP / tool 的区别、skill 太多怎么提高命中率 | ✅ |
-| 9 | 穿插复习题：Q33（Function Calling vs 纯 Prompt）、Q34（JSON 不稳定的防御层级） | ⬜ |
+| 9 | 穿插复习题：Q33（Function Calling vs 纯 Prompt）、Q34（JSON 不稳定的防御层级） | ✅ |
 
 ---
 
@@ -1465,5 +1465,113 @@ MCP：         代码在【另一个服务】执行，agent 只能通过窄接�
 > **Tool** = 一个动作（基本单位）；**MCP** = 标准化、跨应用共享工具的协议（远程、鉴权、集中管控）；**Skill** = 怎么做事的知识。skill 带脚本技术上能提供任何能力，但脚本**在 agent 环境里执行**（凭证要放进去、模型可绕开），MCP **在另一个服务里执行**（窄接口 + server 校验授权）→ 单人本地用 skill + 脚本就够，多用户按人授权用 MCP。
 > 线上用 skill：Claude API（Skills API 上传 + `container.skills` + **代码执行**，脚本在 Anthropic 的**沙箱容器**里跑，LLM 本身不执行代码）/ Agent SDK（同本地）/ Managed Agents；自己写 loop 的应用可自己实现"目录 + `load_guide`"。
 > **LLM 只输出 tool_use，执行的是 Host**：Claude Code 里用 skill 是一次 `Skill` 工具调用（读出正文），运行脚本是一次 `Bash` 调用（检查权限后在本机起子进程）。脚本以你的身份运行 → 来路不明的 skill 要审核，Host 的权限确认是"想做"和"去做"之间的关卡。
+
+---
+
+## 第 9 步 · 穿插复习题
+
+### Q33 · Function Calling vs 纯 Prompt 工具调用 ✅
+
+> 原题：Function Calling 和"在 prompt 里约定 `<tool>xxx</tool>` 让模型输出"相比，优缺点各是什么？什么场景你会选后者？
+
+🔁 回顾：阶段二 s2_02（只输出 JSON、刁钻输入破格）；04 讲义（`tool_use` 是独立内容块，有 id / name / input）；05 讲义（schema 即 prompt）。
+
+```python
+# 做法一：Function Calling（原生）——工具定义是 API 参数，返回独立的 tool_use 块
+client.messages.create(tools=[{"name": "search_products", "description": "...", "input_schema": {...}}], messages=[...])
+# → {"type": "tool_use", "id": "toolu_xx", "name": "search_products", "input": {"risk_level": "C3"}}
+
+# 做法二：纯 Prompt——没有 tools 参数，返回普通文字，代码用正则找 <tool>...</tool> 再 json.loads
+system = """…需要调用工具时，只输出：<tool>{"name": "search_products", "args": {"risk_level": "C3"}}</tool>"""
+```
+
+> **💬 课堂问答**
+>
+> **🙋 问**：课里有个东西底层用的就是做法二（`_bridge.py`：让 Claude CLI 输出纯 JSON、自己解析，有"已知脆弱点"和 `BridgeParseError`）。根据这个线索，纯 prompt 主要会在哪出问题？  
+>
+> **🧑 我的回答**：prompt不一定能让模型按规定正确输出tool_use的json字符串  
+>
+> **🤖 点评**：✅ 最核心的问题：输出格式只是一条约定，没有机制保证。具体五类（下表），最危险的是⑤。
+
+| 问题 | 说明 |
+|---|---|
+| ① 格式出错 | 引号没转义（= bridge 的 `BridgeParseError`）、结束标签漏了、夹杂解释文字、包进代码块 → 代码只能事后用正则"猜" |
+| ② 参数不符合 schema | 参数名 / 类型 / 取值（R3）全要自己检查（🔁 5c 原生方式 SDK 按 schema 校验） |
+| ③ 混进给用户的回答 | 输出是一整段文字，解析没做好 `<tool>…</tool>` 直接显示给用户 |
+| ④ 没有 id | 一次调多个工具时要自己设计编号（🔁 04 tool_result 靠 id 配对） |
+| ⑤ **注入伪造工具调用** | 产品描述里写进 `<tool>{"name": "send_email", …}</tool>`，模型复述时被正则**当成真实调用执行**（🔁 第 7 步间接注入） |
+- 原生方式下工具调用是 API 返回的**独立结构化块**，和文字完全分开 → 数据里写多少 `<tool>` 都只在文字块里。🔁 第 7 步 XSS："**数据和代码要分开**"——原生 function calling 在**协议层**分开了。
+- 原生更可靠：模型**专门训练过**；API 层单独拆出工具调用；可开 **`strict: true`** 保证参数严格符合 schema；自带 id、支持并行调用、`tool_choice` 控制。
+
+> **💬 课堂问答**
+>
+> **🙋 问**：什么情况下还会选纯 prompt？（提示：bridge 为什么用它？很小的开源模型呢？）  
+>
+> **🧑 我的回答**：除非模型本身不支持"tool_use"，不然都应该用原生的"tool"形式  
+>
+> **🤖 点评**：✅ 结论对。具体场景（下表）；不得不用时要补上缺的保证（正好是 Q34）。
+
+| 场景 | 为什么只能用纯 prompt |
+|---|---|
+| 接口不接受 `tools` 参数 | 🔁 **bridge**：背后的 Claude CLI 没地方传 tools → 在 prompt 里要求输出纯 JSON、自己解析，模拟 API 的 tool_use |
+| 模型没训练过工具调用 | 部分小型开源模型、较早模型、某些本地推理服务 |
+| 早期 agent 框架 / 论文 | 🔁 Q6 **ReAct** 原始论文是纯文字 `Thought / Action / Observation`，代码解析 `Action:` 行 |
+- 不得不用时：**约束解码**（constrained decoding：vLLM、llama.cpp 等可按 JSON schema / 语法规则约束生成，模型生成不出不合规格式）；**严格解析 + pydantic 校验**、错误喂回重试；**只从模型自己的输出找工具标签**，工具返回数据和用户输入里的 `<tool>` 先转义或删除。
+
+> 📌 **能用原生就用原生**。纯 prompt 的问题：格式没保证、参数要自己校验、可能混进回答、没 id，**最危险的是数据里伪造的 `<tool>` 会被当真实调用执行**；原生方式在 API 层把工具调用作为独立结构化块返回、模型训练过、可开 strict、自带 id 和并行。纯 prompt 只在接口不支持 tools（如 bridge）、模型没训练过、沿用 ReAct 文本格式时用，并补上约束解码、严格校验、清洗伪造标签。
+
+### Q34 · JSON 输出不稳定的防御层级
+
+> 原题：模型输出的 JSON 偶尔解析失败。从轻到重给出防御层级：每层能挡住哪类问题、挡不住哪类？
+> 面试参考链：Prompt 约束 → 容错解析 → LLM 原生结构化输出 → 重试降级 → pydantic 类型校验
+
+> **💬 课堂问答**
+>
+> **🙋 问**：五件做过的事分别对应链条哪一环？a. s2_02"只输出 JSON" / b. 改用 tool_use / c. `Literal["C1"…"C5"]` 声明参数、SDK 自动校验 / d. `_call_llm_with_retry`（阶段七 R1 只重试可重试错误）/ e. `.get()` 取字段、L02 `score()` verdict 缺失不报错  
+>
+> **🧑 我的回答**：a:Prompt 约束 b:LLM 原生结构化输出 c:pydantic 类型校验 d:重试降级 e:容错解析  
+>
+> **🤖 点评**：✅ 全部对上。
+
+每层能挡什么、挡不住什么：
+
+| 层 | 做过的 | 能挡住 | 挡不住 |
+|---|---|---|---|
+| ① Prompt 约束 | a | 大部分情况模型会照做 | 软约束，刁钻输入会破格 |
+| ② 原生结构化输出 | b（+ `strict: true`） | JSON 一定合法；strict 下参数一定符合 schema | 业务上对不对（见下） |
+| ③ 容错解析 | e | 字段缺失 / 多字段时**不崩溃** | 数据本身是错的不管 |
+| ④ 类型校验 | c | 类型错误、取值超范围，用之前拦下 | 业务上对不对 |
+| ⑤ 重试降级 | d | 偶发失败重试可能就好；一直失败就降级 | 改变不了"模型对这个问题的理解是错的" |
+- 排序小细节：原题把容错解析放在原生结构化输出前面。两种都说得通——纯 prompt 时容错解析是最先依赖的；用了原生结构化输出后它退化成"防崩溃的最后保险"。面试说清"**原生结构化输出是主力、其余是补充**"即可。
+
+> **💬 课堂问答**
+>
+> **🙋 问**：原生工具调用 + `strict: true` 后 JSON 一定合法、参数一定符合 schema。为什么还要更多校验？格式和类型都对了还可能出什么问题？（提示：s4_02b 的 recommended_code、L02 的"年化约 2.5%"、B#7 的风险等级"C4"）  
+>
+> **🧑 我的回答**：格式合法，参数取值合法，但调用意图并不一定合法，比如LLM给低风险偏好的用户提供了一个高风险的产品  
+>
+> **🤖 点评**：✅ 完全正确，说到了最关键、最容易被忽略的一层：**格式合法、类型合法 ≠ 业务上对**（面试原题另一题的"结合场景的语义校验"）。例子正是金融的硬性要求📛 **适当性**：产品风险等级不能超过客户风险承受能力（🔁 FinWise `MATCH_RULES`、03 C→R 映射）。
+
+| 例子 | 格式、类型都对，但是…… | 用什么查 | 🔁 |
+|---|---|---|---|
+| 用户说的 | 给 C2 客户推荐了 R5 产品 | 代码按 `MATCH_RULES` 检查等级是否匹配 | 03 C→R |
+| `recommended_code` | 不在检索候选集里（编的） | 代码检查 code ∈ 候选集 | s4_02b |
+| "年化约 2.5%" | 数字在资料里找不到 | 代码检查数字在资料里 | L02 第 8 步 |
+| 风险等级 `"C4"` | 是模型自己给的 | **不检查，根本不让模型给**（代码按分数算） | B#7 |
+- 最后一行比校验更强：校验 = 让模型给再检查；**去模型化** = 压根不让模型给（🔁 第 7 步"决定作用于谁的值不该是模型能填的参数"）。
+
+完整答案：
+```
+① Prompt 约束           "只输出 JSON"                        软约束，挡大部分，刁钻输入会破格
+② 原生结构化输出        tool_use + strict                     JSON 合法、参数符合 schema
+③ 容错解析              .get()、默认值                         字段缺失时不崩溃
+④ 类型校验              pydantic、Literal                     类型错误、取值超范围，用之前拦下
+⑤ 业务 / 语义校验       对照权威数据：候选集、资料原文、匹配规则   格式全对但业务上错的
+⑥ 关键值去模型化        定级、身份、金额上限由代码决定          模型根本没机会给错
+⑦ 失败处理              错误喂回重试 → 降级 / 转人工（fail-closed）  前面任一层没通过时
+```
+- **越往下越硬**：① 请模型配合；②④ 格式和类型的保证；⑤⑥ **业务正确性**的保证。面试**说到 ⑤⑥ 才算答到点子上**：只说 pydantic = 只考虑"JSON 解析失败"这个技术问题；说到业务校验和去模型化 = 考虑的是"agent 做的事对不对"。
+
+> 📌 **JSON 不稳定的防御层级**：Prompt 约束（软）→ **原生结构化输出 + strict** → 容错解析 → 类型校验 → **业务 / 语义校验** → **关键值去模型化** → 失败处理（fail-closed）。**格式合法 ≠ 类型合法 ≠ 业务正确。**
 
 来源（第 3、4 步更正）：[Equixly: Stateless MCP](https://equixly.com/blog/2026/08/05/stateless-mcp/)、[Wavect 迁移指南](https://wavect.io/blog/mcp-stateless-server-migration-2026/)、[Microsoft: MCP Just Went Stateless](https://techcommunity.microsoft.com/blog/appsonazureblog/mcp-just-went-stateless-%E2%80%94-what-the-2026-spec-changes-about-scaling-on-app-servic/4530222)、[AAIF: MCP 2026 Spec Changes](https://aaif.io/blog/mcp-2026-changes-the-rules)、[Stacktree: breaking changes](https://stacktr.ee/blog/mcp-2026-spec-changes)、[Wikipedia: MCP](https://en.wikipedia.org/wiki/Model_Context_Protocol)
