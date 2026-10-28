@@ -35,6 +35,7 @@
 - [混合检索：BM25 / RRF / 重排 / Query 改写（L01）](#混合检索bm25--rrf--重排--query-改写l01)
 - [RAG 评估：Recall@K / nDCG / RAGAS / LLM-as-judge（L02）](#rag-评估recallk--ndcg--ragas--llm-as-judgel02)
 - [MCP 与 Skills（L03）](#mcp-与-skillsl03)
+- [LLM 推理内部：Tokenizer / Prefill 与 Decode / KV Cache / 采样（L04）](#llm-推理内部tokenizer--prefill-与-decode--kv-cache--采样l04)
 - [常见追问](#常见追问)
 
 ---
@@ -557,6 +558,8 @@ FinWise 例："我五年前买过基金，现在想给孩子存教育金"——�
 
 **与 FinWise 的联系**：风险评估这种"要稳定、可校验、有财务后果"的场景**该用低 temperature**——正好治你见过的 **C4/C3 定级抖动**（B#7）；若用高 temperature 抖动会更严重。⚠️ 本学习环境的 bridge **忽略 temperature**（见 memory），所以真机实验控制不了它——真 API 上评估链路应显式 `temperature=0`，这其实是一条生产化优化项（降低不确定性）。
 
+> ⚠️ **更正（2026-10，L04 第 7 步）**：Claude API `2026-10-21` 版起，请求里带 `temperature` / `top_p` / `top_k` 在**所有模型**上都返回 400（哪怕传默认值）；旧版本上 Opus 4.7 起也已移除。所以上面"显式 `temperature=0`"在 Claude 上已不适用——稳定性改用清晰的 prompt + 结构化输出 + `effort`；而且**低温 ≠ 正确**（准确靠 RAG / 工具 / 校验）。自部署开源模型仍可调，原理见「LLM 推理内部（L04）」。
+
 ---
 
 ## 参数 vs 维度
@@ -830,6 +833,27 @@ eval 告诉你"变差了"，tracing 告诉你"**为什么**变差、卡在哪步
 - **Skill**：操作手册 + 可选脚本，**渐进式加载**（描述常驻 → 正文选中才读 → 脚本按需）。**选择只看描述** → 负面边界和"该用哪个替代"写进 description。命中率：写清该用 / 不该用、相似的拉开距离、用用户的话写描述（选 skill = 检索）、按 agent 只装需要的、测试请求集评估。
 - **Tool / MCP / Skill**：Tool = 一个动作；MCP = 标准化、跨应用共享工具的协议；Skill = 怎么做事的知识（本身不增加新动作）。skill 带脚本技术上能做任何事，但脚本**在 agent 环境里执行**（凭证要放进去、模型可绕开）；MCP **在另一个服务里执行**（窄接口 + server 校验授权）→ 单人本地用 skill + CLI，多用户按人授权用 MCP。**脚本由 Host 执行**，LLM 只输出 tool_use。
 - **Function Calling vs 纯 Prompt 工具调用**：能用原生就用原生（API 层独立结构化块、模型训练过、strict、id、并行）；纯 prompt 格式没保证，**数据里伪造的 `<tool>` 会被当真实调用**。**JSON 防御层级**：Prompt 约束 → 原生结构化输出 + strict → 容错解析 → 类型校验 → **业务 / 语义校验** → **关键值去模型化** → 失败处理。**格式合法 ≠ 类型合法 ≠ 业务正确。**
+
+---
+
+## LLM 推理内部：Tokenizer / Prefill 与 Decode / KV Cache / 采样（L04）
+
+> 详细推导、例子、实验见 `lessons/L04-llm-inference-internals.md`；代码 `backend/scratch/s1_04_prompt_caching.py`、`s1_05_tokenizer_sampling.py`。
+
+- **一次请求的旅程**：Tokenizer → Embedding + 位置信息 → N 层 Transformer → logits → 采样 → 循环。分 **Prefill**（一次并行读完整个 prompt、算出每层 K / V 存进 KV Cache、生成第 1 个 token）和 **Decode**（每轮 1 个新 token）。
+- **Tokenizer**：子词切分（BPE / SentencePiece Unigram），**频率**决定什么成为一个 token；产物 `input_ids`（像主键，语义在学出来的 embedding 向量里）+ `attention_mask`。e5 词表约 25 万项，embedding 表约占其参数 80%（小模型配大词表；大模型参数主要在层里）。**token 数取决于具体 tokenizer**：中文通常更贵但不绝对，换代也会变（Sonnet 5 比 4.6 多约 30%）→ 用**目标模型自己的** tokenizer 数（Claude `count_tokens`，别用 `tiktoken`）。
+- **位置信息**：注意力本身不分先后（词袋问题）→ 绝对位置编码 / **RoPE**（按位置旋转 Q、K，点积只依赖相对距离）；Decode 时位置编号接着历史长度往后数。
+- **层** = **注意力**（token 间交换信息）+ **FFN**（每个 token 各自加工，约占 2/3 参数）+ 残差连接 + LayerNorm；几十个结构相同、参数不同的层串联，**每层有自己的 Q / K / V**。
+- **Q / K / V**：`softmax(Q·Kᵀ/√d)·V`，Q（我找什么）· K（我有什么）→ 比例 → 混合 V（≈ 检索但按比例混合）。**掩码**：双向（全看）vs 因果（只看前面）；`attention_mask` 把补齐的 `<pad>` 在 softmax 前设 −∞，与因果掩码可叠加；e5 平均池化也只算 mask = 1。
+- **三类架构**：Encoder-only（双向、完形填空、理解：e5、bge-reranker）/ Decoder-only（因果、预测下一个、生成：Claude、GPT）/ Encoder-Decoder（编码器双向 + 解码器因果 + **交叉注意力**：Q 来自解码器、K / V 来自编码器，T5）。embedding 传统用 encoder（每 token 看全句）；decoder 做 embedding 改用末位池化；encoder 不适合生成（训练不匹配 + 无 KV Cache）。
+- **Prefill vs Decode**：Prefill **计算密集**、决定 **TTFT**（首 token 等待）；Decode 每轮都要读一遍全部权重和 KV Cache、**访存密集**、决定 **TPOT**（每 token 耗时）。`总耗时 ≈ TTFT + (输出数 − 1) × TPOT`，**通常输出长度主导延时** → 想快先砍输出；batching 分摊权重读取；流式改善体感不缩短总耗时；输出 token 约贵 5 倍。
+- **KV Cache**：缓存每层、每 token、每头的 K 和 V（`2 × 层数 × KV 头数 × 头维度 × 字节数`，7B fp16 约 0.5 MB / token）→ **用显存换计算**（n² → n），是并发和长上下文的瓶颈（GQA 共用 KV 头、PagedAttention 分页）。**只活在一个请求里**。
+- **Prompt caching** = 把**前缀**的 KV Cache 跨请求保留，必须**字节级完全相同**（因果：改第 N 位 → N 之后全变）。Claude：`cache_control` 断点（≤ 4，或顶层自动）、拼接顺序 tools → system → messages、5 分钟 / 1 小时 TTL、**读约 0.1 倍、写 1.25 倍 / 2 倍**、**最低缓存长度因模型而异**（最新 512，Haiku 4.5 / Opus 4.5 为 4096，太短不缓存且不报错），看 `cache_read_input_tokens` 确认。**不变在前、常变在后**（时间戳、用户 ID 别放 system 开头）。
+- **缓存划算条件**：`成本比 = (1.25 + 0.1r) ÷ (1 + r)`，r = 过期前被读次数；**r ≥ 1 就省，r = 0 多付 25%**。多轮 / agent 循环默认开顶层自动缓存；每次都不同、共享部分短又用自动缓存、流量稀疏、并发、隐形失效 → r = 0。**开了必须验证。** FinWise（Haiku 4.5）：只缓存 system 无效，多轮自动缓存约省 26%、最坏约多 2% → 应该开。
+- **API 无服务端会话**："多轮"= 每次重发历史；互不依赖的批量任务**每份一个独立请求**（否则成本平方级、上下文溢出、串台），只在共享指令末尾放显式断点，离线用 Batch API 半价。
+- **采样**：logits →（÷ T）→ softmax → top-k（固定个数）/ **top-p**（累加到 p，自适应）截断 → 重新归一化 → 采样。**T → 0 贪心、T → ∞ 均匀**；先温度后截断。低温 ≠ 正确，JSON 合法靠结构化输出 / 约束解码，T = 0 在 batching 下也可能不完全确定。**Claude API `2026-10-21` 版起所有模型拒绝 temperature / top_p / top_k**。
+- **数值细节**：softmax 先减最大值防溢出（只看差值）；结果求和不保证恰好 1（fp64 约 10⁻¹⁶ 可忽略、fp16 约 10⁻³ → softmax 用 fp32），比较浮点用近似；`np.argmax` 全 False 返回 0（"找第一个满足条件的"要考虑一个都没有）。
+- **`max_tokens`** 是硬上限不是目标长度：长度写进 prompt、上限留余量，**解析前先查 `stop_reason`**，思考也占上限。
 
 ---
 

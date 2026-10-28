@@ -118,7 +118,7 @@
 | 1 | **N1 检索进阶**：BM25 原理 → 混合检索 + RRF → Bi/Cross-Encoder 重排、Top-K 漏斗 → Query 改写（R14 知识库选型未讲，挪到第 9 课）| 在 s4 FinWise 产品库上做 BM25 + RRF + cross-encoder，用 s5_01 的 Hit@K/MRR 对比纯向量 | Q27（余弦/点积/L2）、Q31（逐层排查） | ✅ L01 |
 | 2 | **N2 RAG 评估**：RAGAS（忠实度、context recall/precision、答案相关性）、nDCG、Embedding 选型、agent 级指标；线上反馈回流闭环 | 给 s4_02 的生成结果写忠实度 / 引用准确率 eval（规则 + LLM-as-judge） | Q32（幻觉三层） | ✅ L02 |
 | 3 | **N4 MCP + Skills**：JSON-RPC、传输层、会话状态、失败策略、Skill 命中率 | 把 `search_products` 包成 MCP server，接入 Claude Code 调用 | Q33（FC vs 纯 prompt）、Q34（JSON 防御层级） | ✅ L03 |
-| 4 | **N3 推理内部**：Tokenizer 产物 → Prefill/Decode → KV Cache → RoPE → 采样（temperature/top_p）→ 三类架构 | 用 e5 tokenizer 看 token_id/attention_mask；对比中英文 token 数 | Q28、Q29、Q30、Q37（prompt caching ↔ KV cache） | ⬜ |
+| 4 | **N3 推理内部**：Tokenizer 产物 → Prefill/Decode → KV Cache → RoPE → 采样（temperature/top_p）→ 三类架构 | 用 e5 tokenizer 看 token_id/attention_mask；对比中英文 token 数 | Q28、Q29、Q30、Q37（prompt caching ↔ KV cache） | ✅ L04 |
 | 5 | **N5 Agent 可靠性** + 后端系统设计 4 题：重复调用检测、Saga 补偿、断点恢复、幂等、并发/限流、熔断；HITL | FinWise chat_service 加重复调用检测（附 pytest） | Q35（执行端/输出端防注入） | ⬜ |
 | 6 | **N6 上下文工程** + 意图识别：压缩触发、结构化抽取、上下文分层、lost in the middle、置信度兜底；长期记忆 | 视讲解情况决定 | Q36（prompt 结构） | ⬜ |
 | 7 | **N7 多 Agent 拓扑**：四种拓扑取舍、Plan 的 DAG 校验、冲突仲裁 | 可选：Plan DAG 校验小脚本 | Q38（LangChain vs LangGraph） | ⬜ |
