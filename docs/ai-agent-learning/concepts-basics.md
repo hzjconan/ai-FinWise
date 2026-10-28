@@ -36,6 +36,7 @@
 - [RAG 评估：Recall@K / nDCG / RAGAS / LLM-as-judge（L02）](#rag-评估recallk--ndcg--ragas--llm-as-judgel02)
 - [MCP 与 Skills（L03）](#mcp-与-skillsl03)
 - [LLM 推理内部：Tokenizer / Prefill 与 Decode / KV Cache / 采样（L04）](#llm-推理内部tokenizer--prefill-与-decode--kv-cache--采样l04)
+- [Agent 可靠性：死循环防护 / Saga / 断点恢复 / 并发控制（L05）](#agent-可靠性死循环防护--saga--断点恢复--并发控制l05)
 - [常见追问](#常见追问)
 
 ---
@@ -854,6 +855,23 @@ eval 告诉你"变差了"，tracing 告诉你"**为什么**变差、卡在哪步
 - **采样**：logits →（÷ T）→ softmax → top-k（固定个数）/ **top-p**（累加到 p，自适应）截断 → 重新归一化 → 采样。**T → 0 贪心、T → ∞ 均匀**；先温度后截断。低温 ≠ 正确，JSON 合法靠结构化输出 / 约束解码，T = 0 在 batching 下也可能不完全确定。**Claude API `2026-10-21` 版起所有模型拒绝 temperature / top_p / top_k**。
 - **数值细节**：softmax 先减最大值防溢出（只看差值）；结果求和不保证恰好 1（fp64 约 10⁻¹⁶ 可忽略、fp16 约 10⁻³ → softmax 用 fp32），比较浮点用近似；`np.argmax` 全 False 返回 0（"找第一个满足条件的"要考虑一个都没有）。
 - **`max_tokens`** 是硬上限不是目标长度：长度写进 prompt、上限留余量，**解析前先查 `stop_reason`**，思考也占上限。
+
+---
+
+## Agent 可靠性：死循环防护 / Saga / 断点恢复 / 并发控制（L05）
+
+> 详细讲解、例子、实验见 `lessons/L05-agent-reliability.md`；系统设计题见 `backend-system-design-notes.md`；代码 `backend/app/services/chat_service.py`（重复调用检测）、`backend/scratch/s6_03_concurrency_limits.py`。
+
+- **agent 特有的出错方式**（下一步由模型决定）：停不下来、某步失败、做到一半失败、进程挂了 / 要等人、请求太多、被利用。`MAX_AGENT_STEPS` / `recursion_limit` 是最后一道保险：**保证能停但停得晚**（token、时间白花，用户只拿到错误）。
+- **预算三维**：步数、token、时间，互补。
+- **重复调用检测**：指纹 = 工具名 + 规范化参数（**值 strip、键 `sort_keys`**），计数表；第 2 次回喂 `is_error` 提示（给模型自我纠正机会、仍按 id 配对），第 3 次终止。规范化有分寸（不够漏判、过头误判；通用函数不擅自排序列表）。**计数范围 = 模型能看到的上下文**（FinWise 中间工具往返不落库 → 每轮一份），回喂提示必须是真话。
+- **带错误重试 vs 盲目重试**：参数 / 语义错误交给**模型**改了再试；暂时性错误（超时、429、5xx）由**代码**原样重试。错误信息具体可操作、不外泄细节。**重试降级**：主路径 → 换参数 → 备用工具 → 确定性流程（FinWise `risk_calculator`）→ 转人工。
+- **Saga**（跨系统多步无统一事务；2PC 长时间锁资源、外部 API 不支持）：每步独立提交 + **配补偿**，失败**倒序**补偿已成功步骤（后面依赖前面）。补偿 ≠ 回滚（中间状态可见、补偿会失败）→ 补偿**幂等**、一直重试、转人工、记 **Saga 日志**；失败步骤若**超时**先查状态；**可撤销在前、不可撤销在最后**；补偿由**代码**配对注册，不交给模型。
+- **持久化 + 断点恢复**：每步存 **checkpoint**；工具只读可不存，有副作用必须存。断点恢复只保证**至少一次** → **至少一次 + 幂等 = 效果上恰好一次**。
+- **HITL**（Human-in-the-loop）：存档 → 结束执行 → 审批 → 恢复，**暂停 = 有计划的挂掉**（LangGraph `checkpointer`、`thread_id`、`interrupt`、`Command(resume=...)`）。**恢复时被中断节点从头重跑** → interrupt 前的副作用拆到前一节点或做幂等（去重记录放节点外部）；多个 interrupt 按调用顺序匹配。`thread_id` 由**后端生成**、存业务表与业务 ID 对应，不复用、不让模型 / 前端指定，恢复前校验权限。审批展示真实参数并绑定、超时即拒、审批人非发起人。
+- **并发控制**：**并发数**（Semaphore）≠ **QPS**（令牌桶），**并发数 ≈ QPS × 平均耗时**（利特尔法则）。令牌桶 `min(capacity, 剩余 + rate × 秒数)`：rate 固定、令牌被 capacity 封顶 → 最大突发 capacity、长期 rate；用 `time.monotonic()`。**Semaphore 必须全局共享**；`gather` 批量用 `return_exceptions=True`；`asyncio.timeout` 只取消己方等待（有副作用超时后带幂等键或查状态）。顺序：令牌桶 → Semaphore → timeout → 调用 → 退避（别占通行证）；限流与熔断互补；多实例用 Redis、加按用户限流。
+- **执行端防注入（Q35）**：能"做事"就**假设被攻破**。代码 → **沙箱**（无凭证、隔离只读、用完即毁、断网 / 白名单、资源时间上限、非 root）；URL → 防 **SSRF**（白名单、解析 IP 后禁内网 / 本机 / `169.254.169.254`、每跳重检、出口代理）和借 URL 外传；内容 → 标记不可信、清理截断、读后高风险动作审批；输出 → 敏感信息过滤。本质是切断致命三要素之一。
+- **与后端系统设计相通**：原子的检查 + 修改（`SET NX`、条件 UPDATE、`GETDEL`、Lua）、幂等 / 唯一约束兜底（锁为效率、唯一约束为正确性）、补偿、限流、不信"知道了就能用"。
 
 ---
 

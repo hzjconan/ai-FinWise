@@ -593,7 +593,8 @@ def test_unknown_tool(db):
 def test_max_step_limit(db):
     customer = _make_customer(db)
     session = chat_service.create_session(db, customer.id)
-    llm = MockLLMClient([_search_events("C4") for _ in range(chat_service.MAX_AGENT_STEPS + 1)])
+    # L05：每步参数都不同（C0、C1……），避开重复调用检测，单独验证 MAX_AGENT_STEPS 这道最后的保险
+    llm = MockLLMClient([_search_events(f"C{i}") for i in range(chat_service.MAX_AGENT_STEPS + 1)])
 
     results = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
     assert len(llm.calls) == chat_service.MAX_AGENT_STEPS
@@ -759,3 +760,138 @@ def test_caculate_risk_preference_from_non_numeric_dimensions(db):
     assert result[-1]["event"] == "error"
     assert result[-1]["data"]["code"] == "invalid_dimensions"
     assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
+
+# ---------- L05 练习 3a：工具调用指纹 ----------
+
+def test_call_fingerprint_ignores_key_order():
+    a = chat_service.call_fingerprint("search_products", {"keyword": "养老", "risk_level": "C2"})
+    b = chat_service.call_fingerprint("search_products", {"risk_level": "C2", "keyword": "养老"})
+    assert a == b
+
+
+def test_call_fingerprint_strips_string_values():
+    a = chat_service.call_fingerprint("search_products", {"risk_level": "C2"})
+    b = chat_service.call_fingerprint("search_products", {"risk_level": " C2 "})
+    assert a == b
+
+
+def test_call_fingerprint_distinguishes_tool_names_and_values():
+    base = chat_service.call_fingerprint("search_products", {"risk_level": "C2"})
+    assert base != chat_service.call_fingerprint("get_product_detail", {"risk_level": "C2"})
+    assert base != chat_service.call_fingerprint("search_products", {"risk_level": "C3"})
+    # 意思不同的值不能被规范化合并（防误判）
+    assert chat_service.call_fingerprint("search_products", {"keyword": "养老"}) != \
+        chat_service.call_fingerprint("search_products", {"keyword": "养老保险"})
+
+
+def test_call_fingerprint_keeps_non_string_values():
+    a = chat_service.call_fingerprint("get_product_detail", {"product_codes": ["REC-001", "REC-002"]})
+    b = chat_service.call_fingerprint("get_product_detail", {"product_codes": ["REC-001", "REC-002"]})
+    assert a == b
+    assert a.startswith("get_product_detail:")
+    assert "REC-001" in a          # ensure_ascii=False 之外，内容要可读
+    assert chat_service.call_fingerprint("search_products", {"risk_level": "养老"}).endswith('"养老"}')
+
+
+# ---------- L05 练习 3b：重复调用检测接入 agent 循环 ----------
+
+def _count_execute_tool(monkeypatch) -> list:
+    """把 _execute_tool 包一层，记录真正执行了几次。"""
+    executed = []
+    original = chat_service._execute_tool
+
+    def spy(db, name, tool_input):
+        executed.append((name, tool_input))
+        return original(db, name, tool_input)
+
+    monkeypatch.setattr(chat_service, "_execute_tool", spy)
+    return executed
+
+
+def _tool_results(messages: list[dict]) -> list[dict]:
+    return [b for m in messages if isinstance(m.get("content"), list)
+            for b in m["content"] if b.get("type") == "tool_result"]
+
+
+def test_repeated_call_second_time_gets_hint_not_executed(db, monkeypatch):
+    """第 2 次相同调用：不执行工具，回喂 is_error 提示（仍与 tool_use id 配对），模型可以继续正常收尾。"""
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    executed = _count_execute_tool(monkeypatch)
+    llm = MockLLMClient([
+        [ToolResult(name=chat_service.TOOL_SEARCH, input={"risk_level": "C4"}, id="toolu_1")],
+        [ToolResult(name=chat_service.TOOL_SEARCH, input={"risk_level": "C4"}, id="toolu_2")],
+        _ask_events("您的投资期限大概多久？"),
+    ])
+
+    events = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+
+    assert events[-1]["event"] == "completed"
+    assert len(executed) == 1                                  # 只真正执行了第 1 次
+    results = _tool_results(llm.calls[-1]["messages"])
+    assert [r["tool_use_id"] for r in results] == ["toolu_1", "toolu_2"]
+    hint = results[1]
+    assert hint.get("is_error") is True
+    assert "重复" in hint["content"]
+
+
+def test_repeated_call_third_time_aborts(db, monkeypatch):
+    """第 3 次相同调用：终止本轮，yield repeated_tool_call，不落库。"""
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    executed = _count_execute_tool(monkeypatch)
+    llm = MockLLMClient([_search_events("C4") for _ in range(chat_service.MAX_AGENT_STEPS)])
+
+    events = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+
+    assert len(llm.calls) == chat_service.REPEAT_ABORT_AT      # 第 3 次就停，不用等满 5 步
+    assert len(executed) == 1
+    assert events[-1]["event"] == "error"
+    assert events[-1]["data"]["code"] == "repeated_tool_call"
+    assert db.query(ChatMessage).filter_by(session_id=session.id).count() == 0
+    assert db.query(Assessment).filter_by(customer_id=customer.id).count() == 0
+
+
+def test_repeated_call_detects_whitespace_variant(db):
+    """参数只差首尾空格也算重复（复用 call_fingerprint 的规范化）。"""
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    llm = MockLLMClient([_search_events("C4"), _search_events(" C4 "), _search_events("C4")])
+
+    events = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+
+    assert events[-1]["data"]["code"] == "repeated_tool_call"
+
+
+def test_different_calls_are_not_repeats(db, monkeypatch):
+    """参数不同、工具不同都不算重复：search(C3) → search(C4) → detail → 正常收尾。"""
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    executed = _count_execute_tool(monkeypatch)
+    llm = MockLLMClient([
+        _search_events("C3"), _search_events("C4"), _get_product_detail(["REC-001"]),
+        _ask_events("还有其他问题吗？"),
+    ])
+
+    events = _run(_collect(chat_service.handle_user_message(db, session, "我要投资", llm)))
+
+    assert events[-1]["event"] == "completed"
+    assert len(executed) == 3
+    assert not any(r.get("is_error") for r in _tool_results(llm.calls[-1]["messages"]))
+
+
+def test_repeat_counter_resets_per_turn(db, monkeypatch):
+    """计数表每轮一份：上一轮的工具往返不落库、模型看不到，下一轮再查同样参数是合理的。"""
+    customer = _make_customer(db)
+    session = chat_service.create_session(db, customer.id)
+    executed = _count_execute_tool(monkeypatch)
+    llm = MockLLMClient([
+        _search_events("C3"), _ask_events("第一轮问题"),
+        _search_events("C3"), _ask_events("第二轮问题"),
+    ])
+
+    first = _run(_collect(chat_service.handle_user_message(db, session, "我能接受 C3", llm)))
+    second = _run(_collect(chat_service.handle_user_message(db, session, "还是 C3 吧", llm)))
+
+    assert first[-1]["event"] == "completed" and second[-1]["event"] == "completed"
+    assert len(executed) == 2                                   # 两轮各执行一次，没有被当成重复

@@ -92,6 +92,9 @@ TOOLS_SCHEMA: list[dict] = [
 
 MAX_AGENT_STEPS = 5  # ★ agent loop 硬上限：防止可执行工具被无限调用（失控/烧钱）
 
+REPEAT_HINT_AT = 2    # 第 2 次相同调用：不执行，回喂 is_error 提示
+REPEAT_ABORT_AT = 3   # 第 3 次相同调用：终止本轮
+
 # 工具分类（靠工具名约定区分，不改数据结构）——阶段三② 步骤1：
 #   - 终态工具：模型调它 = 本回合结束（ask 继续问 / conclude 下结论），loop 应收尾。
 #   - 可执行工具：服务端执行、把结果回喂给模型，loop 继续（search_products）。
@@ -109,6 +112,24 @@ def is_terminal_tool(name: str) -> bool:
 def is_executable_tool(name: str) -> bool:
     """模型这次调的工具是否为可执行工具（需服务端执行 + 结果回喂 + 循环继续）。"""
     return name in EXECUTABLE_TOOLS
+
+
+def call_fingerprint(name: str, tool_input: dict) -> str:
+    """L05 练习 3a：工具调用指纹（重复调用检测的计数键）。业务上相同的调用必须得到相同指纹。
+
+    规则：
+      1. 规范化值：顶层的字符串值去掉首尾空格（列表、数字等其他类型原样保留）
+      2. 键排序：json.dumps(..., sort_keys=True, ensure_ascii=False)
+      3. 返回 f"{name}:{序列化结果}"，工具名不同则指纹不同
+    """
+    # 1. 规范化：顶层字符串去首尾空格，其他类型原样保留
+    normalized = {
+        k: (v.strip() if isinstance(v, str) else v)
+        for k, v in tool_input.items()
+    }
+    # 2. 键排序 + 3. 拼接
+    serialized = json.dumps(normalized, sort_keys=True, ensure_ascii=False)
+    return f"{name}:{serialized}"
 
 
 def _execute_tool(db: Session, name: str, tool_input: dict) -> dict:
@@ -319,6 +340,9 @@ async def handle_user_message(
     # 不落库、不吐 delta（用户不该看到内部工具调用）。
     messages = build_api_messages(session) + [{"role": "user", "content": user_content}]
 
+    # 每轮一份的指纹计数表：key=call_fingerprint(name, tool_input)，value=本轮已出现次数
+    repeat_counter: dict[str, int] = {}
+
     # ★ agent loop：调 LLM → 分流（可执行→执行回喂继续 / 终态→收尾）→ 直到收尾或触上限
     for _step in range(MAX_AGENT_STEPS):
         try:
@@ -345,7 +369,16 @@ async def handle_user_message(
 
         # ---- 可执行工具：执行 → 结果回喂 messages（内存，不落库、不吐 delta）→ 继续循环 ----
         if is_executable_tool(tool_result.name):
-            result = _execute_tool(db, tool_result.name, tool_result.input)
+            fp = call_fingerprint(tool_result.name, tool_result.input)
+            count = repeat_counter.get(fp, 0) + 1
+            repeat_counter[fp] = count
+
+            # 第 3 次相同调用：终止本轮
+            if count >= REPEAT_ABORT_AT:
+                yield {"event": "error", "data": {"code": "repeated_tool_call",
+                                                    "message": f"本轮重复调用同一工具 {REPEAT_ABORT_AT} 次，已终止"}}
+                return
+
             # tool_use 与 tool_result 必须靠 id 配对（真实 Anthropic API 强制要求）
             messages.append({
                 "role": "assistant",
@@ -354,13 +387,17 @@ async def handle_user_message(
                     "name": tool_result.name, "input": tool_result.input,
                 }],
             })
-            messages.append({
-                "role": "user",
-                "content": [{
-                    "type": "tool_result", "tool_use_id": tool_result.id,
-                    "content": json.dumps(result, ensure_ascii=False),
-                }],
-            })
+
+            block = {"type": "tool_result", "tool_use_id": tool_result.id}
+            if count >= REPEAT_HINT_AT:
+                # 第 2 次相同调用：不执行工具，回喂 is_error 提示
+                block["content"] = f"重复调用：已用相同参数调用过 {tool_result.name}，结果在上文，请换一种做法或直接回答。"
+                block["is_error"] = True
+            else:
+                # 首次调用：正常执行
+                result = _execute_tool(db, tool_result.name, tool_result.input)
+                block["content"] = json.dumps(result, ensure_ascii=False)
+            messages.append({"role": "user", "content": [block]})
             continue
 
         # 阶段三② 练习3 补「未知工具」防御
