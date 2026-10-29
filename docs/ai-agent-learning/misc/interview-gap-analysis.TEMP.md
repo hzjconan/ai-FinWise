@@ -120,7 +120,7 @@
 | 3 | **N4 MCP + Skills**：JSON-RPC、传输层、会话状态、失败策略、Skill 命中率 | 把 `search_products` 包成 MCP server，接入 Claude Code 调用 | Q33（FC vs 纯 prompt）、Q34（JSON 防御层级） | ✅ L03 |
 | 4 | **N3 推理内部**：Tokenizer 产物 → Prefill/Decode → KV Cache → RoPE → 采样（temperature/top_p）→ 三类架构 | 用 e5 tokenizer 看 token_id/attention_mask；对比中英文 token 数 | Q28、Q29、Q30、Q37（prompt caching ↔ KV cache） | ✅ L04 |
 | 5 | **N5 Agent 可靠性** + 后端系统设计 4 题：重复调用检测、Saga 补偿、断点恢复、幂等、并发/限流、熔断；HITL | FinWise chat_service 加重复调用检测（附 pytest） | Q35（执行端/输出端防注入） | ✅ L05 |
-| 6 | **N6 上下文工程** + 意图识别：压缩触发、结构化抽取、上下文分层、lost in the middle、置信度兜底；长期记忆 | 视讲解情况决定 | Q36（prompt 结构） | ⬜ |
+| 6 | **N6 上下文工程** + 意图识别：压缩触发、结构化抽取、上下文分层、lost in the middle、置信度兜底；长期记忆 | 无代码改动；发现 FinWise prompt 与 TOOLS_SCHEMA 不一致（暂不修） | Q36（prompt 结构） | ✅ L06 |
 | 7 | **N7 多 Agent 拓扑**：四种拓扑取舍、Plan 的 DAG 校验、冲突仲裁 | 可选：Plan DAG 校验小脚本 | Q38（LangChain vs LangGraph） | ⬜ |
 | 8 | **N8 可观测性指标**：trace/span 贯穿、token/延迟/成功率/错误分类、Prometheus/OTel | 可选 | — | ⬜ |
 | 9 | **N9 文档入库** + R14 知识库存什么/怎么选型：表格/跨页/OCR、Docling、增量更新、chunk 冲突、权限过滤 | 可选：增量更新（hash + stable id） | — | ⬜ |
