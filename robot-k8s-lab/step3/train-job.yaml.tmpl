@@ -1,0 +1,33 @@
+# 每个 Job 模拟一个固定需要 3 个 worker 的训练任务。
+# 将 __JOB__ 替换为 a 或 b。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: l08-train-__JOB__
+  namespace: default
+  labels:
+    lab: l08
+    kueue.x-k8s.io/queue-name: train-queue
+spec:
+  suspend: true
+  completions: 3
+  # 课堂答案：3 个 worker 同时运行，按 3 × 4 = 12 张 GPU 准入。
+  parallelism: 3
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        lab: l08
+        train-job: __JOB__
+      annotations:
+        train/workers-needed: "3"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: worker
+          # 只模拟资源占用，不执行训练，不会自行完成。
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 4

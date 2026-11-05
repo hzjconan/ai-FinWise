@@ -1,0 +1,19 @@
+# 单个 Pod 必须在同一个节点上取得 4 个 GPU 资源单位。
+# 不进入 Kueue，单独观察 kube-scheduler 的节点放置判断。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: l08-four-gpu
+  namespace: default
+  labels:
+    lab: l08
+    scenario: four-gpu
+spec:
+  restartPolicy: Never
+  containers:
+    - name: worker
+      image: registry.k8s.io/pause:3.10
+      imagePullPolicy: IfNotPresent
+      resources:
+        limits:
+          nvidia.com/gpu: 4

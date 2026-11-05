@@ -1,0 +1,4 @@
+# Generated lesson media; keep reproducible commands in the lesson.
+*.mkv
+*.mp4
+*.png

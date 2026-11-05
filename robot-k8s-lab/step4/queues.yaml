@@ -1,0 +1,69 @@
+# 先阅读讲义，不要与 step3 的 16 卡额度同时投入使用。
+# 两个团队共用同一种模拟 GPU 和同一物理集群；只划分配额，不绑定机器。
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: Cohort
+metadata:
+  name: l08-teams
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: l08-team-a
+spec:
+  cohortName: l08-teams
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: default
+  queueingStrategy: StrictFIFO
+  preemption:
+    reclaimWithinCohort: Never
+    withinClusterQueue: Never
+  resourceGroups:
+    - coveredResources: [nvidia.com/gpu]
+      flavors:
+        - name: l08-fake-gpu
+          resources:
+            - name: nvidia.com/gpu
+              nominalQuota: 8
+              borrowingLimit: 4
+              lendingLimit: 4
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: l08-team-b
+spec:
+  cohortName: l08-teams
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: default
+  queueingStrategy: StrictFIFO
+  preemption:
+    reclaimWithinCohort: Never
+    withinClusterQueue: Never
+  resourceGroups:
+    - coveredResources: [nvidia.com/gpu]
+      flavors:
+        - name: l08-fake-gpu
+          resources:
+            - name: nvidia.com/gpu
+              nominalQuota: 8
+              borrowingLimit: 4
+              lendingLimit: 4
+---
+# 为聚焦配额，两队暂时使用同一个 namespace；这里不演示租户权限隔离。
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: team-a-queue
+  namespace: default
+spec:
+  clusterQueue: l08-team-a
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: team-b-queue
+  namespace: default
+spec:
+  clusterQueue: l08-team-b

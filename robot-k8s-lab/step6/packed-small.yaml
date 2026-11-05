@@ -1,0 +1,28 @@
+# 人工集中放置的对照组，不是 MostAllocated 策略演示。
+# 固定到本教学集群的一台 worker，4 个独立 Pod 各申请 1 张 GPU。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: l08-small-packed
+  namespace: default
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      lab: l08
+      scenario: packed-small
+  template:
+    metadata:
+      labels:
+        lab: l08
+        scenario: packed-small
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: robot-train-worker
+      containers:
+        - name: small
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 1

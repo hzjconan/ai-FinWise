@@ -3,9 +3,44 @@
 配套 `docs/ai-agent-learning/`。这里是**可运行、带练习**的裸调脚本，用来打通 roadmap 的
 **阶段一（LLM API 基础）**和**阶段二（Prompt Engineering）**。
 
-> 这些是学习脚本，不是业务代码（不在 `backend/app/` 下，不触发测试硬约束）。放心改、随便跑。
+> 这些是学习脚本，不是业务代码。代码修改仍须遵守仓库 `AGENTS.md`：附对应测试并保持已有测试通过。
 
 ## 前置：安装依赖
+
+### L12：视频压缩与端侧过滤实操
+
+视频工具安装在项目虚拟环境中（仓库根目录执行）：
+
+```bash
+backend/.venv/bin/python -m pip install --only-binary=:all: imageio-ffmpeg==0.6.0
+```
+
+本机验证该版本的 macOS ARM64 包内含 FFmpeg 7.1，支持 libx264；通过 Python 的 `imageio_ffmpeg.get_ffmpeg_exe()` 获取可执行路径，不依赖系统 PATH，也不包含 ffprobe。已在 `robot-video-lab/source.mkv` 生成 8 秒 / 640×360 / 30 fps 的 FFV1 无损测试源，完整回读验证 240 帧与生成源像素哈希一致；该媒体由目录内 .gitignore 排除，复现命令和测量边界见 `docs/ai-agent-learning/lessons/L12-robot-video-compression-filtering.md`。当前尚未新增 Python 实验模块，压缩对照与过滤后续逐段进行。
+
+### L09：机器人训练数据管线基线
+
+```bash
+# 仓库根目录；不需要 bridge、外部数据集或 GPU。
+backend/.venv/bin/python backend/scratch/robot_pipeline_baseline.py
+backend/.venv/bin/python backend/scratch/robot_pipeline_baseline.py --batch-size 10
+# 配套测试及后端回归
+cd backend
+.venv/bin/python -m pytest -q tests
+```
+
+`robot_pipeline_baseline.py` 在临时目录生成 4 个合成 episode，前三个训练（48 个三帧窗口）、最后一个验证。测量真实 PNG 字节读取、像素解码、缩放 / 归一化及默认组 batch；固定 num_workers=0、CPU 张量计算线程数 1，不执行视频解码、设备传输或模型训练。刚生成的数据可能命中 OS 缓存，结果不是磁盘冷读 / 真实视频性能。计时不包含数据生成，退出后清理临时数据；动作是用于检查配对的合成标记。
+
+讲义：`docs/ai-agent-learning/lessons/L09-robot-training-data-pipeline.md`。测试：`backend/tests/test_robot_pipeline_baseline.py`。
+
+并行对照（仓库根目录，使用模块方式启动）：
+
+```bash
+backend/.venv/bin/python -m backend.scratch.robot_pipeline_parallel
+# 同一设置的轮数、批大小和预取因子可通过参数改变；一次比较时其余条件保持一致。
+backend/.venv/bin/python -m backend.scratch.robot_pipeline_parallel --epochs 3 --batch-size 8 --prefetch-factor 2
+```
+
+复用相同 Dataset，比较 0 个加载进程、2 个不保留进程、2 / 4 个保留进程；每项默认连续三轮，记录首批等待、每轮总时间和 PID，检查样本覆盖与配对。只测加载，没有训练计算，因此不能从该实验直接推断准备数据与 GPU 计算的重叠效果。固定 Mac / Python 3.12 / torch 2.2.2 环境有资源跟踪器退出兼容处理，依据上游 [3a7ff82](https://github.com/pytorch/pytorch/commit/3a7ff82)，仅在此模块的进程内生效，不修改依赖文件。多进程测试需要操作系统共享内存权限，受限沙箱中可能报 Can't open SHM。
 
 阶段四之后的脚本（embedding、向量库、重排等）需要额外依赖，已声明在 `backend/pyproject.toml` 的 `scratch` 可选组里（版本钉死）：
 

@@ -1,0 +1,27 @@
+# 不指定 nodeSelector，让 l08-binpack 自行挑选节点。
+# 初始只有一个副本；实验中逐个扩到 4，观察每次新 Pod 的放置。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: l08-small-auto
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      lab: l08
+      scenario: auto-small
+  template:
+    metadata:
+      labels:
+        lab: l08
+        scenario: auto-small
+    spec:
+      schedulerName: l08-binpack
+      containers:
+        - name: small
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 1

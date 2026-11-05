@@ -1,0 +1,32 @@
+# 故意用 DaemonSet 在每台 worker 放一个 1 卡 Pod，稳定构造碎片。
+# 这是实验布局，不代表默认调度器必然把任意小任务平均分散。
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: l08-small-scattered
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      lab: l08
+      scenario: scattered-small
+  template:
+    metadata:
+      labels:
+        lab: l08
+        scenario: scattered-small
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      containers:
+        - name: small
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 1

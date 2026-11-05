@@ -1,0 +1,97 @@
+# 独立教学调度器；ConfigMap l08-binpack-config 由 scheduler-config.yaml 创建。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: l08-binpack
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: l08-binpack-scheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:kube-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: l08-binpack
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: l08-binpack-volumes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:volume-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: l08-binpack
+    namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: l08-binpack
+  namespace: kube-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: l08-binpack
+  template:
+    metadata:
+      labels:
+        app: l08-binpack
+    spec:
+      serviceAccountName: l08-binpack
+      # 使用控制面缓存的同版本调度器镜像，本进程不申请 GPU。
+      nodeSelector:
+        kubernetes.io/hostname: robot-train-control-plane
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: scheduler
+          image: registry.k8s.io/kube-scheduler:v1.37.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - kube-scheduler
+            - --config=/etc/l08-scheduler/config.yaml
+            - --bind-address=0.0.0.0
+            - --cert-dir=/tmp/l08-scheduler-certs
+            - --authentication-skip-lookup=true
+            - --v=2
+          ports:
+            - name: https
+              containerPort: 10259
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: https
+              scheme: HTTPS
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/l08-scheduler
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: l08-binpack-config

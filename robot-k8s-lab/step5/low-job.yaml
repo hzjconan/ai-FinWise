@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: l08-low-train
+  namespace: default
+  labels:
+    lab: l08
+    kueue.x-k8s.io/queue-name: priority-queue
+    kueue.x-k8s.io/priority-class: l08-experiment
+spec:
+  suspend: true
+  completions: 2
+  parallelism: 2
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        lab: l08
+        train-job: low
+      annotations:
+        train/workers-needed: "2"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: worker
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 4

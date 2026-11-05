@@ -1,0 +1,23 @@
+# L08 第 2 步：一个"训练 worker" Pod 的模板。submit-interleaved.sh 会把 __JOB__ / __IDX__ 替换掉。
+# 每个训练任务需要 3 个 worker，每个 worker 独占一整台机器的 4 张卡（1 Pod × 4 卡，见 L07 第 5 步追问）。
+# 容器用 pause 镜像：只占着资源、什么也不干——正好模拟"worker 已启动，在等其他 worker 到齐"。
+apiVersion: v1
+kind: Pod
+metadata:
+  name: train-__JOB__-worker-__IDX__
+  labels:
+    lab: l08
+    train-job: "__JOB__"
+  annotations:
+    train/workers-needed: "3"
+spec:
+  restartPolicy: Never
+  containers:
+    - name: worker
+      image: registry.k8s.io/pause:3.10
+      imagePullPolicy: IfNotPresent
+      resources:
+        limits:
+          # TODO（第 2 步）：每个 worker 要独占一整台机器的 GPU。填上 GPU 的资源名和数量
+          # 提示：资源名就是 fake-gpu.sh 里上报的那个
+          nvidia.com/gpu: 4

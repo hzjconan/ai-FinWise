@@ -1,0 +1,31 @@
+# 团队甲的 12 卡任务：使用自身 8 卡份额并借入 4 卡。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: l08-team-a-train
+  namespace: default
+  labels:
+    lab: l08
+    kueue.x-k8s.io/queue-name: team-a-queue
+spec:
+  suspend: true
+  completions: 3
+  parallelism: 3
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        lab: l08
+        train-job: team-a
+      annotations:
+        train/workers-needed: "3"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: worker
+          # 只模拟资源占用，不会自行完成。
+          image: registry.k8s.io/pause:3.10
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 4

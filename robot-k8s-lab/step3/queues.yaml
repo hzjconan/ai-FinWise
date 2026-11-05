@@ -1,0 +1,31 @@
+# 只在 kind-robot-train 教学集群使用。
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: l08-fake-gpu
+spec: {}
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: l08-gpu-pool
+spec:
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: default
+  queueingStrategy: StrictFIFO
+  resourceGroups:
+    - coveredResources: [nvidia.com/gpu]
+      flavors:
+        - name: l08-fake-gpu
+          resources:
+            - name: nvidia.com/gpu
+              nominalQuota: 16
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: train-queue
+  namespace: default
+spec:
+  clusterQueue: l08-gpu-pool

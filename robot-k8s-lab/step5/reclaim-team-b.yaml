@@ -1,0 +1,5 @@
+# ClusterQueue 的 merge patch，不是可单独 apply 的完整资源。
+# 仅修改乙的回收权限，保留 step4 的无抢占基线配置。
+spec:
+  preemption:
+    reclaimWithinCohort: Any

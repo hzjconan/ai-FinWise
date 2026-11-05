@@ -1,0 +1,13 @@
+# L08 实验集群：1 个控制面 + 4 个 worker（每个 worker 稍后用 fake-gpu.sh 模拟 4 张 GPU，共 16 张）
+# 对应面试场景"8 台 × 4 卡"的缩小版：机器数减半，每台卡数不变，跨机 / 碎片问题照样能复现。
+#
+#   kind create cluster --config robot-k8s-lab/kind-cluster.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: robot-train
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+  - role: worker
+  - role: worker

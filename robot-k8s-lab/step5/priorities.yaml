@@ -1,0 +1,14 @@
+# Kueue 的任务优先级：控制整体 Workload 的排队和抢占，不修改 Pod 优先级。
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: WorkloadPriorityClass
+metadata:
+  name: l08-experiment
+value: 10
+description: 普通实验任务
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: WorkloadPriorityClass
+metadata:
+  name: l08-production
+value: 100
+description: 紧急生产任务

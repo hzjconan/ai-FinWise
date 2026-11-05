@@ -1,0 +1,29 @@
+# 独立的 8 卡队列，不参加 Cohort。本实验不使用剩余物理 GPU。
+# 使用前先退出 step4 的甲乙任务并移除其队列，避免重复记账。
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: l08-priority-pool
+spec:
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: default
+  queueingStrategy: StrictFIFO
+  preemption:
+    reclaimWithinCohort: Never
+    withinClusterQueue: LowerPriority
+  resourceGroups:
+    - coveredResources: [nvidia.com/gpu]
+      flavors:
+        - name: l08-fake-gpu
+          resources:
+            - name: nvidia.com/gpu
+              nominalQuota: 8
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: priority-queue
+  namespace: default
+spec:
+  clusterQueue: l08-priority-pool
