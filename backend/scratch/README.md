@@ -15,7 +15,19 @@
 backend/.venv/bin/python -m pip install --only-binary=:all: imageio-ffmpeg==0.6.0
 ```
 
-本机验证该版本的 macOS ARM64 包内含 FFmpeg 7.1，支持 libx264；通过 Python 的 `imageio_ffmpeg.get_ffmpeg_exe()` 获取可执行路径，不依赖系统 PATH，也不包含 ffprobe。已在 `robot-video-lab/source.mkv` 生成 8 秒 / 640×360 / 30 fps 的 FFV1 无损测试源，完整回读验证 240 帧与生成源像素哈希一致；该媒体由目录内 .gitignore 排除，复现命令和测量边界见 `docs/ai-agent-learning/lessons/L12-robot-video-compression-filtering.md`。当前尚未新增 Python 实验模块，压缩对照与过滤后续逐段进行。
+本机验证该版本的 macOS ARM64 包内含 FFmpeg 7.1，支持 libx264；通过 Python 的 `imageio_ffmpeg.get_ffmpeg_exe()` 获取可执行路径，不依赖系统 PATH，也不包含 ffprobe。已在 `robot-video-lab/source.mkv` 生成 8 秒 / 640×360 / 30 fps 的 FFV1 无损测试源，完整回读验证 240 帧与生成源像素哈希一致；该媒体由目录内 .gitignore 排除，复现命令、压缩对照和测量边界见 `docs/ai-agent-learning/lessons/L12-robot-video-compression-filtering.md`。
+
+端侧过滤对照（先讲解代码再运行，输出目录不可包含同名实验文件）：
+
+```bash
+backend/.venv/bin/python -m backend.scratch.robot_video_filter \
+  --output-dir backend/scratch/robot-video-lab/filter-demo
+# 后端目录执行对应测试
+cd backend
+.venv/bin/python -m pytest -q tests/test_robot_video_filter.py
+```
+
+生成三段 FFV1 无损合成视频，真实解码后比较“仅变化阈值”与“已知事件保护”。只生成报告、选择完整片段，不删除原文件。contact 元数据由实验构造，不代表算法从图像识别了接触；无此信号的关键事件仍可能漏掉。报告中的保留字节数不是实际网络费用，筛选也有解码与计算开销。媒体和报告在 filter-demo 下忽略，脚本与测试纳入版本管理。
 
 ### L09：机器人训练数据管线基线
 

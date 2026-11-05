@@ -30,6 +30,7 @@ prod = [
 # 版本钉死：是 2026-10 重建 venv 时实际验证可用的组合（torch 2.2.2 需要 numpy<2）。
 scratch = [
     "numpy==1.26.4",
+    "imageio-ffmpeg==0.6.0",
     "torch==2.2.2",
     "transformers==4.57.6",
     "sentence-transformers==2.7.0",
