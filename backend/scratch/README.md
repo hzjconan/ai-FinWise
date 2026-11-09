@@ -7,6 +7,33 @@
 
 ## 前置：安装依赖
 
+### L13：小型视频训练与 checkpoint（已完成）
+
+```bash
+# 仓库根目录，生成新目录中的视频和动作清单；已有同名输出会拒绝覆盖。
+backend/.venv/bin/python -m backend.scratch.robot_video_data \
+  --output-dir backend/scratch/robot-video-lab/training-demo-state
+# 后端目录：对应数据测试
+cd backend
+.venv/bin/python -m pytest -q tests/test_robot_video_data.py
+```
+
+16 段 FFV1 无损合成视频，每段 8 帧、8 fps、32×32，示范脚本记录下一步水平位移。先按 episode 分组，再构建三帧窗口，训练 60 样本 / 验证 20 样本。schema_version=2 添加与窗口末帧同时间的模拟二维本体位置，归一化为 state=[x/31,y/31]，另保留原始值 / 时间供检查；模型输入是图像和当前状态，不输入未来状态或动作标签。实际视频解码后在内存缓存。旧版 training-demo 不覆盖，使用新目录 training-demo-state。`robot_video_model.py` 实现小 MLP 融合前向；`robot_video_train.py` 提供 `train_step()`、`train_epoch()`、`evaluate()`、`fit()`，整轮损失按样本数加权，对应测试为 `tests/test_robot_video_model.py` 和 `tests/test_robot_video_train.py`。共享内存受限环境中 PyTorch CLI 可能报 OpenMP Can't open SHM，需要正常共享内存权限。详见 `docs/ai-agent-learning/lessons/L13-robot-video-training-checkpoint.md`。
+
+30 轮实测训练误差很低而验证误差仍高，呈过拟合迹象，不能宣称任务质量达标。实验曲线在忽略目录的 history-30epochs.json，历史记录不是 checkpoint。`robot_video_checkpoint.py` 已实现 `save_checkpoint()` / `load_checkpoint()`：在 CPU / num_workers=0 / 整轮边界保存模型、Adam、进度、配置、清单指纹和 RNG，先写临时文件再发布，不覆盖已有版本；恢复前检查配置 / 数据 / 结构，最后恢复 RNG，对应测试为 `tests/test_robot_video_checkpoint.py`。已实际保存第 5 轮 / 40 步的 epoch-005.pt（二进制忽略），并在新进程恢复核对相同验证结果。
+
+跨进程续训对照 CLI：
+
+```bash
+backend/.venv/bin/python -m backend.scratch.robot_video_resume_demo \
+  --manifest backend/scratch/robot-video-lab/training-demo-state/manifest.json \
+  --output-dir backend/scratch/robot-video-lab/training-demo-state/resume-comparison \
+  --mode prepare
+# 随后另起命令：相同路径，--mode 改为 resume，再改为 without-adam。
+```
+
+prepare 保存连续 10 轮参考与第 5 轮中断点；resume 新进程完整恢复到第 10 轮，与参考权重 / Adam / RNG 精确一致；without-adam 只重置 Adam、保持同权重和随机状态，后续更新发生分歧。对应真实多进程集成测试为 `tests/test_robot_video_resume_demo.py`。已有阶段产物拒绝覆盖，报告 / checkpoint 留在忽略目录。此对照验证恢复技术，不等于模型质量达标，不代表 GPU / 分布式也必然逐位一致。
+
 ### L12：视频压缩与端侧过滤实操
 
 视频工具安装在项目虚拟环境中（仓库根目录执行）：
