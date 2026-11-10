@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="training-diagram" xmlns="http://www.w3.org/2000/svg" width="1120" height="520" viewBox="0 0 1120 520" role="img" aria-label="视频和当前状态进入模型，预测与示范动作进入损失，反向传播后由Adam更新模型权重">
+  <style>
+    #training-diagram{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#17253d;background:#fff}
+    #training-diagram .box{fill:#f8fafc;stroke:#d8e2ef;stroke-width:1.5}#training-diagram .active .box{fill:#edf3ff;stroke:#285cd4;stroke-width:3}#training-diagram .label-box{fill:#fff5e8;stroke:#edceaa}#training-diagram .active .label-box{stroke:#b76417;stroke-width:3}#training-diagram .flow-title{font-size:18px;font-weight:700;fill:#17253d}#training-diagram .flow-sub{font-size:13px;fill:#64748b}#training-diagram .flow-code{font-size:12px;fill:#536884;font-family:ui-monospace,Menlo,monospace}#training-diagram .flow-number{font-size:23px;font-weight:750;fill:#285cd4}#training-diagram .forward{fill:none;stroke:#5981dc;stroke-width:2.5;marker-end:url(#arrow-blue)}#training-diagram .backward{fill:none;stroke:#9067c8;stroke-width:2.5;marker-end:url(#arrow-purple)}#training-diagram .label-arrow{fill:none;stroke:#bf7a2d;stroke-width:2.5;marker-end:url(#arrow-orange)}
+  </style>
+  <defs>
+    <marker id="arrow-blue" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#5981dc"/></marker>
+    <marker id="arrow-purple" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#9067c8"/></marker>
+    <marker id="arrow-orange" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#bf7a2d"/></marker>
+  </defs>
+  <g data-node="input"><rect class="box" x="22" y="26" width="252" height="154" rx="14"/><text class="flow-title" x="40" y="55">过去三帧视频</text>
+    <rect x="40" y="75" width="48" height="48" rx="3" fill="#142033"/><rect x="108" y="75" width="48" height="48" rx="3" fill="#142033"/><rect x="176" y="75" width="48" height="48" rx="3" fill="#142033"/>
+    <rect x="64" y="106.5" width="6" height="6" fill="white"/><rect x="129" y="106.5" width="6" height="6" fill="white"/><rect x="194" y="106.5" width="6" height="6" fill="white"/>
+    <text class="flow-sub" x="40" y="145">0s　　　0.125s　　 0.25s</text><text class="flow-code" x="40" y="166">images: [8,3,3,32,32]</text>
+  </g>
+  <g data-node="input"><rect class="box" x="22" y="208" width="252" height="100" rx="14"/><text class="flow-title" x="40" y="238">当前模拟本体状态</text><text class="flow-sub" x="40" y="262">0.25s 位置 [12,21]</text><text class="flow-code" x="40" y="288">state: [8,2] · 已归一化</text></g>
+  <path class="forward" d="M274 108 H338"/><path class="forward" d="M274 256 H306 V208 H338"/>
+  <g data-node="model"><rect class="box" x="338" y="86" width="236" height="162" rx="15"/><text class="flow-title" x="358" y="119">模型：视频特征 + 状态</text><text class="flow-code" x="358" y="145">VideoStateModel.forward</text><text class="flow-sub" x="358" y="172">32 个视频特征 + 2 个状态值</text><text class="flow-number" id="diagram-theta" x="358" y="208">权重 θ</text><text class="flow-sub" x="358" y="232">θ 代表整组模型参数</text></g>
+  <path class="forward" d="M574 142 H634"/>
+  <g data-node="prediction"><rect class="box" x="634" y="80" width="210" height="116" rx="14"/><text class="flow-title" x="652" y="110">预测动作 ŷ</text><text class="flow-number" id="diagram-prediction" x="652" y="146">模型先猜</text><text class="flow-code" x="652" y="174">prediction: [8,1]</text></g>
+  <g data-node="label"><rect class="label-box" x="634" y="230" width="210" height="105" rx="14"/><text class="flow-title" x="652" y="260">示范动作 y</text><text x="652" y="291" fill="#b76417" font-size="23" font-weight="750">−2（首样本）</text><text class="flow-sub" x="652" y="316">来自示范记录，不输入模型</text></g>
+  <path class="forward" d="M844 138 H870 V202 H896"/><path class="label-arrow" d="M844 282 H870 V264 H896"/>
+  <g data-node="loss"><rect class="box" x="896" y="155" width="204" height="142" rx="14"/><text class="flow-title" x="915" y="185">MSE：比较差距</text><text class="flow-number" id="diagram-loss" x="915" y="223">平均平方误差</text><text class="flow-sub" x="915" y="250">先相减，再平方，取平均</text><text class="flow-code" x="915" y="277">loss_fn(prediction, y)</text></g>
+  <path class="backward" d="M998 297 V355"/>
+  <g data-node="gradient"><rect class="box" x="896" y="355" width="204" height="108" rx="14"/><text class="flow-title" x="915" y="386">反向传播：求梯度</text><text class="flow-code" x="915" y="412">loss.backward()</text><text class="flow-sub" id="diagram-gradient" x="915" y="440">参数怎样影响误差？</text></g>
+  <path class="backward" d="M896 410 H846"/>
+  <g data-node="optimizer"><rect class="box" x="634" y="355" width="210" height="108" rx="14"/><text class="flow-title" x="652" y="386">Adam：更新参数</text><text class="flow-code" x="652" y="412">optimizer.step()</text><text class="flow-sub" x="652" y="440">这里才真正修改权重</text></g>
+  <path class="backward" d="M634 410 H456 V249"/><text x="344" y="439" font-size="14" fill="#7953bc">更新 θ；下一次预测用新权重</text>
+  <text class="flow-sub" x="24" y="493">图中画面只展示第一条样本；这一批有 8 个样本。训练会重复这个流程，再做独立验证。</text>
+</svg>

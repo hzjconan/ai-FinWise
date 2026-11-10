@@ -1,0 +1,13 @@
+{
+  "name": "robot-training-learning-visuals",
+  "private": true,
+  "scripts": {
+    "test": "node robot-training-flow.test.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright": "1.59.1"
+  }
+}

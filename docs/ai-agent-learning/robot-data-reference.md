@@ -2,7 +2,7 @@
 
 > 用途：面试前快速翻看。来源：`lessons/L07-robot-video-data-flywheel.md`（详细讲解 + 课堂问答）；面试题参考回答见 `robot-data-interview-notes.md`。
 > 岗位：性能与成本优化，兼顾质量与效率。**前提：视频质量不变**；扩容按"机器可加，但要花钱"。
-> 版本：v7（2026-11-09），L07～L13 已完成；剩余成本估算器一个必修实操。
+> 版本：v7.1（2026-11-10），L07～L13 已完成，追加训练流程离线交互可视化；剩余成本估算器一个必修实操。
 
 ## 目录
 
@@ -602,6 +602,8 @@ backend/.venv/bin/python -m backend.scratch.robot_video_filter \
 测试 `backend/tests/test_robot_video_filter.py` 10 项通过；最近完整 `tests scratch` 回归 240 passed，1 项已有弃用警告。本课全部为合成视频，没有真实机器人任务评估；完整面试口述见面试笔记题 6。L12 已完成，剩余两课必修为小型训练 / checkpoint 与成本估算器。
 
 ## 16. 视频与状态训练、checkpoint 速查（L13）
+
+可视化入口：[离线交互版](visuals/robot-training-flow.html) · [静态流程图](visuals/robot-training-flow.svg) · [图片预览](visuals/robot-training-flow-preview.png)。可逐步回放真实参数更新记录、查看完整31条训练 / 验证记录，并切换checkpoint恢复对照；页面本身不执行训练。
 
 ### 用简单话解释整个训练
 

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>视频与状态，怎样变成一次参数更新？</title>
+  <style>
+    :root{color-scheme:light;--ink:#17253d;--muted:#64748b;--blue:#285cd4;--teal:#07836d;--orange:#b76417;--purple:#7953bc;--line:#dce4ed;--paper:#fff;--bg:#f3f6fa}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}button,select{font:inherit}button,select,a{touch-action:manipulation}button{cursor:pointer}button:disabled{cursor:default;opacity:.45}button:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid #91b6ff;outline-offset:3px}
+    main{max-width:1390px;margin:auto;padding:32px 28px 48px}.eyebrow{font-size:12px;font-weight:750;letter-spacing:.12em;color:var(--blue)}h1{font-size:clamp(25px,3vw,39px);line-height:1.3;margin:9px 0 12px;letter-spacing:-.04em}h2{font-size:22px;margin:0 0 8px}h3{font-size:17px;margin:0 0 8px}p{margin:8px 0}.muted{color:var(--muted)}.intro{max-width:920px;color:#526174}.badges{display:flex;gap:9px;flex-wrap:wrap;margin:18px 0}.badge{border:1px solid var(--line);border-radius:30px;background:#fff;padding:4px 12px;font-size:12px}.badge.blue{color:var(--blue);border-color:#c7d8ff;background:#edf3ff}
+    .tabs{display:flex;gap:7px;flex-wrap:wrap;margin:24px 0 18px}.tab{border:1px solid var(--line);border-radius:10px;padding:10px 17px;background:white;color:var(--muted);font-weight:650}.tab[aria-selected=true]{background:var(--ink);border-color:var(--ink);color:white}[hidden]{display:none!important}.panel{background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:0 6px 28px #19355606}.panel-head{padding:20px 24px 0}.flow-layout{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(290px,.9fr);gap:18px}.diagram-wrap{padding:10px 12px 6px;min-width:0}#training-diagram{width:100%;height:auto;display:block}.diagram-caption{padding:0 20px 18px;font-size:12px;color:var(--muted)}.step-panel{padding:23px;display:flex;flex-direction:column;min-width:0}.step-number{color:var(--blue);font-size:12px;font-weight:750;letter-spacing:.08em}.step-title{font-size:22px;margin:9px 0 10px}.code{background:#f2f5fa;border:1px solid #e1e7f0;border-radius:10px;padding:13px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.75 ui-monospace,SFMono-Regular,Consolas,monospace;margin:14px 0}.takeaway{border-left:3px solid var(--blue);padding:9px 12px;background:#f0f5ff;border-radius:0 8px 8px 0}.function{margin-top:12px;font-size:12px;color:var(--muted)}.function a{color:var(--blue)}.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:20px}.button{border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);padding:8px 12px}.button.primary{background:var(--blue);color:#fff;border-color:var(--blue)}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:15px}.metric{padding:15px 17px;background:#fff;border:1px solid var(--line);border-radius:12px;min-width:0}.metric-label{font-size:12px;color:var(--muted)}.metric-value{font-size:22px;font-weight:750;margin-top:4px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.metric-note{font-size:11px;color:var(--muted);margin-top:3px}.note{font-size:12px;color:var(--muted);margin:12px 1px}.warning{background:#fff5e9;border:1px solid #f1d6b5;color:#8a4b13;padding:13px 16px;border-radius:11px;margin:16px 0}.content{padding:23px}.chart{width:100%;height:auto;display:block}.legend{display:flex;gap:20px;flex-wrap:wrap;font-size:13px}.legend span:before{content:"";display:inline-block;width:18px;height:3px;margin:0 7px 4px 0;background:var(--blue)}.legend span:last-child:before{background:var(--orange)}.chart-toolbar{display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;margin:16px 0}.chart-toolbar select{border:1px solid var(--line);border-radius:8px;padding:6px;background:white}.chart-point{cursor:pointer}.restore-options{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}.restore-options label{border:1px solid var(--line);padding:10px 14px;border-radius:10px;cursor:pointer}.restore-options input{accent-color:var(--blue);margin-right:7px}.lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.lane{padding:18px;border:1px solid var(--line);border-radius:12px;background:#f8fafc}.lane.selected{border-color:#88aaf8;background:#eef4ff}.lane-track{font-size:17px;font-weight:700;margin:12px 0}.snapshot{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.snapshot span{background:#f1f4f8;padding:5px 10px;border-radius:7px;font-size:12px}footer{font-size:12px;color:var(--muted);margin-top:22px}footer a{color:var(--blue)}
+    @media(max-width:1050px){.flow-layout{grid-template-columns:1fr}.step-panel{min-height:290px}.lanes{grid-template-columns:1fr}.controls{margin-top:6px}}@media(max-width:600px){main{padding:22px 12px}.tab{padding:8px 11px;font-size:13px}.panel-head,.content,.step-panel{padding:17px}.metrics{gap:7px;grid-template-columns:repeat(2,minmax(0,1fr))}.metric:last-child{grid-column:1/-1}.metric{padding:11px 9px}.metric-value{font-size:18px}.diagram-caption{padding:0 12px 12px}.code{font-size:11px}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">L13 · 从数据到学习，再到续训</div>
+  <h1>视频与状态，怎样变成一次参数更新？</h1>
+  <p class="intro">给模型过去的画面和当前状态，让它猜下一步动作。用示范动作衡量误差，再调整内部权重。<strong>我们知道示范答案，不预先知道正确权重。</strong></p>
+  <div class="badges"><span class="badge blue">可逐步回放</span><span class="badge">使用本课真实运行记录</span><span class="badge">离线打开 · 不需要启动后端</span></div>
+  <nav class="tabs" role="tablist" aria-label="训练流程视角">
+    <button class="tab" id="tab-update" role="tab" aria-selected="true" aria-controls="panel-update" data-tab="update">① 一次参数更新</button>
+    <button class="tab" id="tab-history" role="tab" aria-selected="false" aria-controls="panel-history" data-tab="history" tabindex="-1">② 多轮训练与验证</button>
+    <button class="tab" id="tab-checkpoint" role="tab" aria-selected="false" aria-controls="panel-checkpoint" data-tab="checkpoint" tabindex="-1">③ 保存与恢复</button>
+  </nav>
+
+  <section id="panel-update" role="tabpanel" aria-labelledby="tab-update">
+    <div class="flow-layout">
+      <div class="panel">
+        <div class="panel-head"><h2>先猜，再比较，最后才更新</h2><p class="muted">蓝色是预测路径，橙色是示范标签，紫色把误差带回参数更新。</p></div>
+        <div class="diagram-wrap">
+<svg id="training-diagram" xmlns="http://www.w3.org/2000/svg" width="1120" height="520" viewBox="0 0 1120 520" role="img" aria-label="视频和当前状态进入模型，预测与示范动作进入损失，反向传播后由Adam更新模型权重">
+  <style>
+    #training-diagram{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#17253d;background:#fff}
+    #training-diagram .box{fill:#f8fafc;stroke:#d8e2ef;stroke-width:1.5}#training-diagram .active .box{fill:#edf3ff;stroke:#285cd4;stroke-width:3}#training-diagram .label-box{fill:#fff5e8;stroke:#edceaa}#training-diagram .active .label-box{stroke:#b76417;stroke-width:3}#training-diagram .flow-title{font-size:18px;font-weight:700;fill:#17253d}#training-diagram .flow-sub{font-size:13px;fill:#64748b}#training-diagram .flow-code{font-size:12px;fill:#536884;font-family:ui-monospace,Menlo,monospace}#training-diagram .flow-number{font-size:23px;font-weight:750;fill:#285cd4}#training-diagram .forward{fill:none;stroke:#5981dc;stroke-width:2.5;marker-end:url(#arrow-blue)}#training-diagram .backward{fill:none;stroke:#9067c8;stroke-width:2.5;marker-end:url(#arrow-purple)}#training-diagram .label-arrow{fill:none;stroke:#bf7a2d;stroke-width:2.5;marker-end:url(#arrow-orange)}
+  </style>
+  <defs>
+    <marker id="arrow-blue" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#5981dc"/></marker>
+    <marker id="arrow-purple" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#9067c8"/></marker>
+    <marker id="arrow-orange" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#bf7a2d"/></marker>
+  </defs>
+  <g data-node="input"><rect class="box" x="22" y="26" width="252" height="154" rx="14"/><text class="flow-title" x="40" y="55">过去三帧视频</text>
+    <rect x="40" y="75" width="48" height="48" rx="3" fill="#142033"/><rect x="108" y="75" width="48" height="48" rx="3" fill="#142033"/><rect x="176" y="75" width="48" height="48" rx="3" fill="#142033"/>
+    <rect x="64" y="106.5" width="6" height="6" fill="white"/><rect x="129" y="106.5" width="6" height="6" fill="white"/><rect x="194" y="106.5" width="6" height="6" fill="white"/>
+    <text class="flow-sub" x="40" y="145">0s　　　0.125s　　 0.25s</text><text class="flow-code" x="40" y="166">images: [8,3,3,32,32]</text>
+  </g>
+  <g data-node="input"><rect class="box" x="22" y="208" width="252" height="100" rx="14"/><text class="flow-title" x="40" y="238">当前模拟本体状态</text><text class="flow-sub" x="40" y="262">0.25s 位置 [12,21]</text><text class="flow-code" x="40" y="288">state: [8,2] · 已归一化</text></g>
+  <path class="forward" d="M274 108 H338"/><path class="forward" d="M274 256 H306 V208 H338"/>
+  <g data-node="model"><rect class="box" x="338" y="86" width="236" height="162" rx="15"/><text class="flow-title" x="358" y="119">模型：视频特征 + 状态</text><text class="flow-code" x="358" y="145">VideoStateModel.forward</text><text class="flow-sub" x="358" y="172">32 个视频特征 + 2 个状态值</text><text class="flow-number" id="diagram-theta" x="358" y="208">权重 θ</text><text class="flow-sub" x="358" y="232">θ 代表整组模型参数</text></g>
+  <path class="forward" d="M574 142 H634"/>
+  <g data-node="prediction"><rect class="box" x="634" y="80" width="210" height="116" rx="14"/><text class="flow-title" x="652" y="110">预测动作 ŷ</text><text class="flow-number" id="diagram-prediction" x="652" y="146">模型先猜</text><text class="flow-code" x="652" y="174">prediction: [8,1]</text></g>
+  <g data-node="label"><rect class="label-box" x="634" y="230" width="210" height="105" rx="14"/><text class="flow-title" x="652" y="260">示范动作 y</text><text x="652" y="291" fill="#b76417" font-size="23" font-weight="750">−2（首样本）</text><text class="flow-sub" x="652" y="316">来自示范记录，不输入模型</text></g>
+  <path class="forward" d="M844 138 H870 V202 H896"/><path class="label-arrow" d="M844 282 H870 V264 H896"/>
+  <g data-node="loss"><rect class="box" x="896" y="155" width="204" height="142" rx="14"/><text class="flow-title" x="915" y="185">MSE：比较差距</text><text class="flow-number" id="diagram-loss" x="915" y="223">平均平方误差</text><text class="flow-sub" x="915" y="250">先相减，再平方，取平均</text><text class="flow-code" x="915" y="277">loss_fn(prediction, y)</text></g>
+  <path class="backward" d="M998 297 V355"/>
+  <g data-node="gradient"><rect class="box" x="896" y="355" width="204" height="108" rx="14"/><text class="flow-title" x="915" y="386">反向传播：求梯度</text><text class="flow-code" x="915" y="412">loss.backward()</text><text class="flow-sub" id="diagram-gradient" x="915" y="440">参数怎样影响误差？</text></g>
+  <path class="backward" d="M896 410 H846"/>
+  <g data-node="optimizer"><rect class="box" x="634" y="355" width="210" height="108" rx="14"/><text class="flow-title" x="652" y="386">Adam：更新参数</text><text class="flow-code" x="652" y="412">optimizer.step()</text><text class="flow-sub" x="652" y="440">这里才真正修改权重</text></g>
+  <path class="backward" d="M634 410 H456 V249"/><text x="344" y="439" font-size="14" fill="#7953bc">更新 θ；下一次预测用新权重</text>
+  <text class="flow-sub" x="24" y="493">图中画面只展示第一条样本；这一批有 8 个样本。训练会重复这个流程，再做独立验证。</text>
+</svg>
+        </div>
+        <div class="diagram-caption">这是真实运行记录的回放，不在浏览器内重新训练 MLP。首样本预测与整批 MSE 是两种不同统计。</div>
+      </div>
+      <aside class="panel step-panel" aria-live="polite">
+        <div class="step-number" id="step-count">第 1 / 7 步</div>
+        <h2 class="step-title" id="step-title"></h2><p id="step-description"></p>
+        <pre class="code" id="step-code"></pre><div class="takeaway" id="step-takeaway"></div>
+        <div class="function">对应代码：<a id="step-source" href="../../../backend/scratch/robot_video_data.py" target="_blank" rel="noopener"><code id="step-function"></code></a></div>
+        <div class="controls"><button class="button" id="previous">上一步</button><button class="button primary" id="next">下一步</button><button class="button" id="play">自动回放</button><button class="button" id="reset">重置</button></div>
+      </aside>
+    </div>
+    <div class="metrics">
+      <div class="metric"><div class="metric-label">模型参数</div><div class="metric-value" id="parameter-state">θ₀ · 未更新</div><div class="metric-note">清梯度、前向、求梯度都不会自动更新权重</div></div>
+      <div class="metric"><div class="metric-label">首样本预测（目标为 −2）</div><div class="metric-value" id="prediction-value">尚未预测</div><div class="metric-note">更新后需再次前向，才会得到新预测</div></div>
+      <div class="metric"><div class="metric-label">整批 8 样本的 MSE</div><div class="metric-value" id="loss-value">尚未计算</div><div class="metric-note">不是仅对图中一个样本计算的误差</div></div>
+    </div>
+    <p class="note">本段回放使用未打乱的第一批样本。真实更新前后：首样本预测 0.067307 → 0.001509；整批 MSE 3.122642 → 2.914682。这批误差减小，不代表验证或其他样本一定更好。</p>
+  </section>
+
+  <section class="panel content" id="panel-history" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <h2>训练样本答得越来越好，未见数据呢？</h2><p class="muted">另一次多轮实验：60 个训练窗口，每轮 8 次更新；20 个验证窗口不参与参数更新。这里展示完整 31 条记录。</p>
+    <div class="chart-toolbar"><div class="legend"><span>训练过程平均 MSE</span><span>轮末验证 MSE</span></div><label>选择轮次 <select id="epoch-select" aria-label="选择训练轮次"></select></label></div>
+    <svg class="chart" id="history-chart" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 320" role="img" aria-label="30轮训练误差下降，而验证误差高于未训练基线的实测曲线"></svg>
+    <div class="metrics"><div class="metric"><div class="metric-label">当前轮次</div><div class="metric-value" id="selected-epoch"></div></div><div class="metric"><div class="metric-label">训练过程平均 MSE</div><div class="metric-value" id="selected-train"></div></div><div class="metric"><div class="metric-label">轮末验证 MSE</div><div class="metric-value" id="selected-val"></div></div></div>
+    <div class="warning"><strong>本次出现明显过拟合迹象。</strong>第 30 轮训练 MSE 约 0.0008，验证 MSE 约 3.8373，仍差于未训练基线 2.5624。不能因训练 loss 很低就宣布模型质量达标。</div>
+    <p class="note">两条曲线的计量时点不同：训练值汇总各批更新过程，验证值来自轮末固定模型。点选曲线或选择轮次查看实际数值。</p>
+    <p class="function">对应函数：<a href="../../../backend/scratch/robot_video_train.py" target="_blank" rel="noopener"><code>train_epoch() → evaluate() → fit()</code></a></p>
+  </section>
+
+  <section class="panel content" id="panel-checkpoint" role="tabpanel" aria-labelledby="tab-checkpoint" hidden>
+    <h2>模型权重相同，为什么续训仍可能不同？</h2><p class="muted">本课实际启动新进程，从第 5 轮继续到第 10 轮。除了是否恢复 Adam，其余权重、数据顺序和随机状态保持对齐。</p>
+    <div class="restore-options" role="group" aria-label="选择恢复方案"><label><input type="radio" name="restore" value="full" checked>完整恢复 Adam</label><label><input type="radio" name="restore" value="without">不恢复 Adam 状态</label></div>
+    <div class="lanes"><div class="lane"><h3>连续训练参考</h3><div class="lane-track">0 → 10 轮</div><p>80 次参数更新<br>Adam 内部计数：80</p></div><div class="lane selected" id="lane-full"><h3>完整恢复</h3><div class="lane-track">5 轮 → 保存 → 新进程 → 5 轮</div><p>权重、Adam、RNG 和曲线<br><strong>与连续训练逐项一致</strong></p></div><div class="lane" id="lane-without"><h3>重置 Adam</h3><div class="lane-track">相同中断权重 → 新 Adam</div><p>仍总共训练 10 轮<br><strong>但后续更新路径不同</strong></p></div></div>
+    <div class="metrics"><div class="metric"><div class="metric-label">最终 Adam 内部计数</div><div class="metric-value" id="checkpoint-adam">80</div><div class="metric-note">总训练更新数两种方案都是 80</div></div><div class="metric"><div class="metric-label">对连续训练的最大参数差</div><div class="metric-value" id="checkpoint-delta">0</div><div class="metric-note" id="checkpoint-result">逐项完全一致</div></div><div class="metric"><div class="metric-label">第 10 轮验证 MSE</div><div class="metric-value" id="checkpoint-val">4.191725</div><div class="metric-note">质量与恢复正确性分别判断</div></div></div>
+    <div class="snapshot"><span>模型权重</span><span>Adam 的 m / v 与步数</span><span>已完成轮数与 global_step</span><span>配置与数据清单指纹</span><span>随机数与取样状态</span></div>
+    <p id="checkpoint-explanation" class="warning"></p><p class="note">这是固定 CPU 单线程下的实测，不承诺 GPU / 分布式也逐位一致。实验在已保存的整轮边界退出；未保存进度仍可能需要重算。两种续训模型均未证明机器人任务质量达标。</p>
+    <p class="function">对应函数：<a href="../../../backend/scratch/robot_video_checkpoint.py" target="_blank" rel="noopener"><code>save_checkpoint() / load_checkpoint()</code></a> · <a href="../../../backend/scratch/robot_video_resume_demo.py" target="_blank" rel="noopener"><code>robot_video_resume_demo.main()</code></a></p>
+  </section>
+  <footer>数据来源：L13 本地合成视频＋模拟状态实操。这里回放与解释记录，不是实际机器人控制界面。<a href="../lessons/L13-robot-video-training-checkpoint.md">完整讲义</a> · <a href="../robot-data-reference.md">参考文档</a></footer>
+</main>
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const stages = [
+    {title:"准备输入与示范标签",description:"一批有 8 个样本，每个包含过去三帧图像和当前模拟位置。示范动作单独留作比较，不送进模型。",code:'batch = next(iter(train_loader))\nimages = batch["images"]\nstate = batch["state"]\ntarget = batch["action"]',takeaway:"视频和状态是输入；示范动作是答案。未来位置不能提前作为输入。",fn:"VideoActionDataset.__getitem__",source:"robot_video_data.py",active:["input"]},
+    {title:"清掉上一次的梯度",description:"开始本次更新前，清掉上一次累积的梯度。模型已经学到的权重仍然保留。",code:"optimizer.zero_grad(set_to_none=True)",takeaway:"清梯度 ≠ 把模型参数清零。",fn:"train_step",source:"robot_video_train.py",active:["optimizer"]},
+    {title:"前向：用当前权重猜动作",description:"模型提取视频特征，拼上当前状态，再预测每个样本的动作。第一条预测约 +0.0673，目标是 −2。",code:'prediction = model(\n    batch["images"], batch["state"]\n)',takeaway:"此时只是计算预测，权重还没有变化。",fn:"VideoStateModel.forward",source:"robot_video_model.py",active:["model","prediction"]},
+    {title:"用示范答案计算 MSE",description:"预测减去示范动作，平方后取平均。这里的 3.122642 是 8 个样本的平均，不是单个样本的误差。",code:'loss = nn.MSELoss()(\n    prediction, batch["action"]\n)',takeaway:"我们知道示范动作，不预先知道正确权重。MSE 不是错误率或百分比。",fn:"train_step",source:"robot_video_train.py",active:["label","loss"]},
+    {title:"反向传播：计算梯度",description:"计算每个参数的变化会怎样影响误差，把结果放在参数的梯度中。这里不猜测或展示虚构的数值梯度。",code:"loss.backward()",takeaway:"backward() 计算梯度，本身还不更新模型权重。",fn:"train_step",source:"robot_video_train.py",active:["gradient"]},
+    {title:"Adam 真正更新参数",description:"Adam 根据当前梯度和历史统计调整权重。θ₀ 变成 θ₁；θ 只是整组参数的符号。",code:"optimizer.step()",takeaway:"屏幕上的预测和 loss 仍是旧权重算出的。需要再做一次前向，才能看到新结果。",fn:"train_step",source:"robot_video_train.py",active:["optimizer","model"]},
+    {title:"重新预测，检查本批变化",description:"用更新后的权重重新计算同一批：首样本预测约 +0.001509；整批 MSE 降至 2.914682。",code:'with torch.no_grad():\n    prediction = model(images, state)\n    loss_after = loss_fn(prediction, target)',takeaway:"这只是同一训练批的复算，不是独立验证，也不能保证其他样本都变好。",fn:"train_step 更新前后对照",source:"robot_video_train.py",active:["model","prediction","loss"]}
+  ];
+  const history = [
+    [0,null,2.5624234199523928],[1,2.3980740229288737,2.8381794929504394],[2,1.8627481698989867,3.298127365112305],[3,1.3313451687494913,3.86545934677124],[4,1.0001421292622885,4.240016651153565],[5,0.6524826606114705,4.344740295410157],[6,0.4168593148390452,4.477562046051025],[7,0.2797938962777456,4.493595600128174],[8,0.19369326581557592,4.367745876312256],[9,0.12933273563782374,4.23465518951416],[10,0.08758494462817908,4.191725349426269],[11,0.06445017655690512,4.115993213653565],[12,0.04843209907412529,4.069380807876587],[13,0.04506689046199123,4.007027244567871],[14,0.03245244345938166,4.034654998779297],[15,0.02587313608964905,4.020154190063477],[16,0.021656548084380726,3.989653968811035],[17,0.01833742214560819,3.9458046913146974],[18,0.014312907335503647,3.9468588829040527],[19,0.011311090937427555,3.913322639465332],[20,0.009734252809236447,3.8906720161437987],[21,0.007300536982559909,3.8975977420806887],[22,0.005931914874478631,3.8828075408935545],[23,0.0046343061276881295,3.8699031829833985],[24,0.0037210424306977075,3.862643337249756],[25,0.002761684972210787,3.8656506538391113],[26,0.002243746896177375,3.856242275238037],[27,0.0018207307276801052,3.8374180793762207],[28,0.0016744765198382083,3.8564351558685304],[29,0.0009956582922313827,3.8478047370910646],[30,0.0008084388816617623,3.8373334884643553]
+  ];
+  let stage = 0, timer = null, activeTab = "update";
+  function stop(){ if(timer !== null){clearInterval(timer);timer=null;} $("play").textContent="自动回放"; }
+  function render(){
+    const entry=stages[stage];
+    $("panel-update").dataset.stage=String(stage);
+    $("step-count").textContent=`第 ${stage+1} / ${stages.length} 步`;
+    $("step-title").textContent=entry.title; $("step-description").textContent=entry.description;
+    $("step-code").textContent=entry.code; $("step-takeaway").textContent=entry.takeaway;
+    $("step-function").textContent=entry.fn; $("step-source").href=`../../../backend/scratch/${entry.source}`;
+    const theta=stage>=5?"θ₁ · 已更新":"θ₀ · 未更新";
+    const prediction=stage>=6?"+0.001509":stage>=2?"+0.067307":"尚未预测";
+    const loss=stage>=6?"2.914682":stage>=3?"3.122642":"尚未计算";
+    $("parameter-state").textContent=theta; $("diagram-theta").textContent=theta;
+    $("prediction-value").textContent=prediction; $("diagram-prediction").textContent=prediction;
+    $("loss-value").textContent=loss; $("diagram-loss").textContent=loss;
+    $("diagram-gradient").textContent=stage>=4?"∇θ L 已计算":"尚未求梯度";
+    document.querySelectorAll("[data-node]").forEach(node=>node.classList.toggle("active",entry.active.includes(node.dataset.node)));
+    $("previous").disabled=stage===0; $("next").disabled=stage===stages.length-1;
+    $("play").disabled=stage===stages.length-1;
+  }
+  $("previous").addEventListener("click",()=>{stop();stage=Math.max(0,stage-1);render();});
+  $("next").addEventListener("click",()=>{stop();stage=Math.min(stages.length-1,stage+1);render();});
+  $("reset").addEventListener("click",()=>{stop();stage=0;render();});
+  $("play").addEventListener("click",()=>{if(timer!==null){stop();return;} $("play").textContent="暂停回放";timer=setInterval(()=>{stage++;if(stage>=stages.length-1){stage=stages.length-1;stop();}render();},1100);});
+  const tabs=[...document.querySelectorAll("[data-tab]")];
+  function selectTab(name){stop();activeTab=name;tabs.forEach(tab=>{const selected=tab.dataset.tab===name;tab.setAttribute("aria-selected",String(selected));tab.tabIndex=selected?0:-1;$(tab.getAttribute("aria-controls")).hidden=!selected;});}
+  tabs.forEach((tab,index)=>{tab.addEventListener("click",()=>selectTab(tab.dataset.tab));tab.addEventListener("keydown",event=>{if(!["ArrowLeft","ArrowRight","Home","End"].includes(event.key))return;event.preventDefault();const next=event.key==="Home"?0:event.key==="End"?tabs.length-1:(index+(event.key==="ArrowRight"?1:tabs.length-1))%tabs.length;selectTab(tabs[next].dataset.tab);tabs[next].focus();});});
+  document.addEventListener("keydown",event=>{if(activeTab!=="update"||event.target.closest("input,select,textarea,[role=tab]"))return;if(event.key==="ArrowRight"||event.key==="ArrowLeft"){event.preventDefault();stop();stage=Math.max(0,Math.min(stages.length-1,stage+(event.key==="ArrowRight"?1:-1)));render();}});
+  $("epoch-select").innerHTML=history.map(row=>`<option value="${row[0]}">第 ${row[0]} 轮${row[0]===0?"（未训练）":""}</option>`).join("");
+  function selectEpoch(epoch){
+    const row=history[epoch];$("epoch-select").value=String(epoch);$("selected-epoch").textContent=epoch===0?"0 · 未训练":String(epoch);
+    $("selected-train").textContent=row[1]===null?"—":row[1].toFixed(4);$("selected-val").textContent=row[2].toFixed(4);
+    const x=e=>60+e/30*820,y=v=>280-v/5*250;
+    let svg="";for(let i=0;i<=5;i++)svg+=`<line x1="60" y1="${y(i)}" x2="880" y2="${y(i)}" stroke="#e2e8f0"/><text x="45" y="${y(i)+4}" text-anchor="end" font-size="12" fill="#64748b">${i}</text>`;
+    for(const e of [0,5,10,15,20,25,30])svg+=`<text x="${x(e)}" y="303" text-anchor="middle" font-size="12" fill="#64748b">${e}</text>`;
+    svg+='<text x="60" y="17" font-size="12" fill="#64748b">MSE</text><text x="896" y="303" font-size="12" fill="#64748b">轮</text>';
+    svg+=`<line x1="60" y1="${y(history[0][2])}" x2="880" y2="${y(history[0][2])}" stroke="#94a3b8" stroke-dasharray="5 5"/><text x="878" y="${y(history[0][2])-8}" text-anchor="end" fill="#64748b" font-size="11">未训练验证基线 2.5624</text>`;
+    for(const [column,color] of [[1,"#285cd4"],[2,"#b76417"]]){
+      const rows=history.filter(r=>r[column]!==null);svg+=`<polyline points="${rows.map(r=>`${x(r[0])},${y(r[column])}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2.5"/>`;
+      for(const r of rows)svg+=`<circle class="chart-point" data-epoch="${r[0]}" cx="${x(r[0])}" cy="${y(r[column])}" r="${r[0]===epoch?6:3}" fill="${color}" tabindex="0" role="button" aria-label="选择第${r[0]}轮"><title>第${r[0]}轮：${r[column].toFixed(6)}</title></circle>`;
+    }
+    $("history-chart").innerHTML=svg;
+  }
+  $("epoch-select").addEventListener("change",event=>selectEpoch(Number(event.target.value)));
+  $("history-chart").addEventListener("click",event=>{if(event.target.dataset.epoch!==undefined)selectEpoch(Number(event.target.dataset.epoch));});
+  $("history-chart").addEventListener("keydown",event=>{if(["Enter"," "].includes(event.key)&&event.target.dataset.epoch!==undefined){event.preventDefault();selectEpoch(Number(event.target.dataset.epoch));}});
+  function renderCheckpoint(){
+    const full=document.querySelector('input[name="restore"]:checked').value==="full";
+    $("checkpoint-adam").textContent=full?"80":"40";$("checkpoint-delta").textContent=full?"0":"0.029396";
+    $("checkpoint-val").textContent=full?"4.191725":"4.342761";$("checkpoint-result").textContent=full?"逐项完全一致":"更新路径发生分歧";
+    $("lane-full").classList.toggle("selected",full);$("lane-without").classList.toggle("selected",!full);
+    $("checkpoint-explanation").textContent=full?"完整恢复：权重、Adam 的历史统计与计数、取样及随机状态一起恢复。本实验中继续训练与未中断结果完全一致。":"不恢复 Adam：权重仍保留，当前梯度也会重新计算；丢失的是过去的 m / v 和计数。新 Adam 的更新量可能不同，后续权重逐渐分歧。";
+  }
+  document.querySelectorAll('input[name="restore"]').forEach(input=>input.addEventListener("change",renderCheckpoint));
+  render();selectEpoch(30);renderCheckpoint();
+})();
+</script>
+</body>
+</html>

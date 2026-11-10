@@ -227,3 +227,5 @@
 **函数入口**：VideoActionDataset → VideoStateModel.forward → train_step → train_epoch → evaluate / fit → save_checkpoint / load_checkpoint；可执行跨进程对照见 robot_video_resume_demo。
 
 **最终状态**：用户确认答疑无问题，要求简明全流程总结，已整理至讲义及参考第 16 节。本课完成；最近完整回归 292 passed（1 项已有弃用警告）。剩余必修成本估算器。
+
+后续可视化复习（2026-11-10）：[训练流程交互版](visuals/robot-training-flow.html)，可逐步查看本课实际记录及函数映射，另有真实曲线与恢复对照。不在浏览器中训练模型，不把首样本误差与整批指标混淆。
