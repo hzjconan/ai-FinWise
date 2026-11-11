@@ -1,0 +1,37 @@
+{
+  "name": "candidate",
+  "video": {
+    "robots": 100,
+    "cameras_per_robot": 2,
+    "bitrate_mbps": 4,
+    "recording_hours": 8,
+    "upload_fraction": 0.25
+  },
+  "upload": {
+    "window_hours": 4,
+    "days_per_month": 30,
+    "price_per_gb": 0.02
+  },
+  "raw_storage": {
+    "retention_days": 15,
+    "replicas": 3,
+    "price_per_logical_gb_month": 0.10
+  },
+  "derived_storage": {
+    "daily_gb": 1440,
+    "retention_days": 7,
+    "replicas": 3,
+    "price_per_logical_gb_month": 0.10
+  },
+  "training": {
+    "gpus": 16,
+    "hours_per_run": 4,
+    "runs_per_month": 30,
+    "price_per_gpu_hour": 5
+  },
+  "checkpoint": {
+    "recompute_gpu_hours": 8,
+    "save_load_gpu_hours": 2,
+    "storage_io_monthly_cost": 30
+  }
+}

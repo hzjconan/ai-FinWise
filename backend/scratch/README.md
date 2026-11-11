@@ -7,6 +7,29 @@
 
 ## 前置：安装依赖
 
+### L14：成本估算器（进行中）
+
+`load_scenario()` 将UTF-8 JSON文件读为配置字典；`estimate_scenario()` 接收字典，串联上传量、带宽、原始/派生存储、训练和checkpoint计算，返回各项明细与所列项目月费合计。示例配置为 `robot-cost-lab/baseline.json`；原始视频每日入库量从上传量传入，不重复手填。CLI已可运行（仓库根目录）：
+
+```bash
+backend/.venv/bin/python -m backend.scratch.robot_cost_model \
+  backend/scratch/robot-cost-lab/baseline.json \
+  --compare backend/scratch/robot-cost-lab/candidate.json \
+  --upfront-cost 1000
+```
+
+不加 `--compare` 即只估算原方案；比较命令输出两份明细和净节省/回本，示例分别10880与12200元/月，净节省−1320元、回本为null。仅覆盖列明教学项目，质量与业务约束需另行检查。
+
+`compare_costs()` 比较同范围月费，返回净节省与一次性投入的简单回本月数；净节省非正时回本为None，不代替质量及业务评估。
+
+`checkpoint_overhead()` 汇总月度重算与额外保存/加载的GPU小时，以及checkpoint存储读写费；输入须排除与正常训练和其他存储项重复的部分。
+
+`training_compute_cost()` 按固定GPU卡数、每次占用时长及每月运行次数计算GPU小时和折算月费，未加入checkpoint等额外开销。
+
+`storage_estimate()` 估算保留窗口积累满后的逻辑GB、副本物理占用和按逻辑GB计费的月费，副本数不再乘入月费；物理占用未含预留空间，不是裸盘采购规格。
+
+`robot_cost_model.py` 提供 `daily_video_volume()`，根据机器人 / 相机数量、平均码率、每日录制时长及上传字节比例，分别返回每日采集与上传的十进制 GB；`required_upload_mbps()` 根据上传量及上传窗口计算平均有效吞吐 Mbps。逐函数讲解见 `docs/ai-agent-learning/lessons/L14-robot-cost-estimator.md`，对应测试为 `tests/test_robot_cost_model.py`。
+
 ### L13：小型视频训练与 checkpoint（已完成）
 
 ```bash
