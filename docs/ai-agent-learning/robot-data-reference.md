@@ -2,7 +2,7 @@
 
 > 用途：面试前快速翻看。来源：`lessons/L07-robot-video-data-flywheel.md`（详细讲解 + 课堂问答）；面试题参考回答见 `robot-data-interview-notes.md`。
 > 岗位：性能与成本优化，兼顾质量与效率。**前提：视频质量不变**；扩容按"机器可加，但要花钱"。
-> 版本：v8.0（2026-11-11），L07～L13 已完成；L14成本估算器代码实操已完成，待最后面试复盘与答疑确认。保留训练流程离线交互可视化。
+> 版本：v8.1（2026-11-11），L07～L14机器人数据飞轮、集群调度及必修实操主线已完成，包含成本估算器与最后面试复盘。保留训练流程离线交互可视化。
 
 ## 目录
 
@@ -706,7 +706,7 @@ L13完成时完整 `tests scratch` 回归292 passed，1项已有弃用警告。�
 
 ## 17. 成本估算器实操速查（L14）
 
-讲义：[L14成本估算器](lessons/L14-robot-cost-estimator.md)。代码 `backend/scratch/robot_cost_model.py`，示例输入在 `backend/scratch/robot-cost-lab/`，对应测试 `backend/tests/test_robot_cost_model.py`。代码实操已完成，最后面试复盘待回答。
+讲义：[L14成本估算器](lessons/L14-robot-cost-estimator.md)。代码 `backend/scratch/robot_cost_model.py`，示例输入在 `backend/scratch/robot-cost-lab/`，对应测试 `backend/tests/test_robot_cost_model.py`。代码实操与最后面试复盘已完成，用户确认无疑问。
 
 ### 使用与函数对应
 
@@ -757,3 +757,5 @@ CLI实测净节省−1320元/月，一次投入1000元时回本null。比未含�
 本工具只计算列明项目，不包含CPU等所有平台费用，不模拟故障、预测质量或自动决定上线；GB流量模型不能直接替代包月专线模型。存储按稳定保留窗口估算，不是首月逐日积累账单。先核验质量、训练时限、保留与回溯硬性要求，再在可行方案中比较成本和业务价值。质量与时限输入须由实际评估与业务提供，不能从价格或GPU数量推断。
 
 工具新增131项测试；最近完整 `tests scratch` 回归423 passed，1项已有passlib/crypt弃用警告。包含新进程真实CLI对比、配置传播、费用不重复计算和错误路径。
+
+最后复盘提醒：若额外要求每轮最多5小时、原始视频至少保留30天，则上述baseline超时、candidate保留期不足，两者都不能直接采用。将candidate保留期恢复30天，沿用其余假设月费为13280元，再核验预算与价值；或先优化baseline并实测能否达到时限。先查硬性条件，再比较可行方案，不把“不符合要求”只当成贵不贵的取舍。2026-11-11完成点评，用户确认无疑问。

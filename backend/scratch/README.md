@@ -7,7 +7,7 @@
 
 ## 前置：安装依赖
 
-### L14：成本估算器（进行中）
+### L14：成本估算器（已完成）
 
 `load_scenario()` 将UTF-8 JSON文件读为配置字典；`estimate_scenario()` 接收字典，串联上传量、带宽、原始/派生存储、训练和checkpoint计算，返回各项明细与所列项目月费合计。示例配置为 `robot-cost-lab/baseline.json`；原始视频每日入库量从上传量传入，不重复手填。CLI已可运行（仓库根目录）：
 
